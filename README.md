@@ -1,9 +1,10 @@
 # Physics Toy Factory
 
 Physics Toy Factory is the product-side companion to S17Code. It owns the trusted p5.js fixture,
-server-side smoke checker, dedicated scratch-workspace lifecycle, product API, and browser UI. Phase 1
-establishes the package, executable checker, and safe workspace boundary; orchestration and the full UI
-arrive in later phases.
+server-side smoke checker, dedicated scratch-workspace lifecycle, product API, and browser UI. Phase 2
+adds the process-local session, authenticated S17 adapter, asynchronous Create and Follow-up
+orchestration, raw graph/code reads, and streaming event proxy. The full browser UI arrives in later
+phases.
 
 ## Prerequisites
 
@@ -22,9 +23,28 @@ uv sync --locked --dev
 uv run physics-toy-factory
 ```
 
-The server binds to `127.0.0.1:8120` by default. `GET /api/health` is the only product endpoint in
-Phase 1. On first startup the app copies its immutable seed to `PTF_WORKSPACE`, initializes that
-directory as a dedicated Git repository, and records the base fixture as `physics-toy-base-v1`.
+The server binds to `127.0.0.1:8120` by default. On first startup the app copies its immutable seed to
+`PTF_WORKSPACE`, initializes that directory as a dedicated Git repository, and records the base
+fixture as `physics-toy-base-v1`. Start the S17 service with the product profile below before creating
+a run.
+
+The Phase 2 browser-facing API is:
+
+```text
+GET  /api/health
+GET  /api/session
+POST /api/session/reset
+POST /api/runs
+POST /api/runs/follow-up
+GET  /api/runs/{session-owned-run-id}
+GET  /api/runs/{session-owned-run-id}/events
+GET  /api/code
+```
+
+The browser never supplies a workspace path or upstream URL, and it never receives the S17 control
+token. A process restart intentionally forgets product session links. If the workspace contains a
+prior sketch or other dirty content, the new session starts in `reset_required`; reset explicitly
+before creating another toy.
 
 ## Phase 1 deterministic gate
 
@@ -33,6 +53,16 @@ uv sync --locked --dev
 uv run ruff check .
 uv run pytest -q tests/test_config.py tests/test_workspace.py tests/test_p5check.py
 ```
+
+## Phase 2 deterministic gate
+
+```bash
+uv run ruff check .
+uv run pytest -q tests/test_s17_client.py tests/test_orchestrator.py tests/test_api.py
+```
+
+These tests use an in-process fake S17 ASGI service and recorded graph/SSE fixtures. They require no
+network or model call.
 
 The complete non-browser suite is:
 
@@ -68,11 +98,17 @@ S17_EXEC_CONTAINER=1
 S17_EXEC_IMAGE=<pinned non-root Node image>
 ```
 
+Expose `S17_EXEC_CONTAINER` and `S17_EXEC_IMAGE` to the product process as well so `/api/health` can
+report the configured mode. That report is configuration visibility, not independent proof that the
+container runtime is available. Without runtime verification, the product does not claim a secure
+sandbox.
+
 `vm` is not an OS security boundary. If S17 container execution with networking disabled is not
 available, the system is development-only for trusted prompts and must not be described as securely
 sandboxed.
 
 ## Phase boundary
 
-Phase 1 does not start S17 runs, proxy SSE, decide run readiness, serve generated code, or render an
-iframe preview. Modules for those later contracts exist only as typed package seams.
+Phase 2 does not implement the Phase 3 activity UI, Phase 4 iframe preview, automatic browser repair,
+Surprise Me, skill A/B, or planted-refusal demonstrations. Follow-up backend authority and linking are
+present so the later UI can use them, but generated code is not rendered in an iframe yet.

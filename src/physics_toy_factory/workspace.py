@@ -104,6 +104,14 @@ class WorkspaceManager:
             raise WorkspaceSafetyError("reset left tracked or untracked changes behind")
         return verified
 
+    def reset_required(self) -> bool:
+        """Return whether generated or dirty content requires an explicit reset."""
+
+        report = self.validate_identity()
+        return (report.root / "sketch.js").exists() or bool(
+            self._git(report.root, "status", "--porcelain")
+        )
+
     def _validate_target_shape(self, *, require_exists: bool) -> Path:
         configured = self.root
         if not configured.is_absolute():

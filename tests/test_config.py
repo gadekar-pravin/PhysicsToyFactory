@@ -106,3 +106,18 @@ def test_settings_are_frozen_and_secret_repr_is_redacted(tmp_path: Path) -> None
     assert "super-secret-token" not in repr(settings)
     with pytest.raises(ValidationError):
         settings.port = 9000  # type: ignore[misc]
+
+
+def test_container_mode_requires_a_pinned_image(tmp_path: Path) -> None:
+    values = {
+        "s17_control_token": "private",
+        "workspace": tmp_path / "workspace",
+        "artifact_dir": tmp_path / "artifacts",
+        "s17_exec_container": True,
+    }
+    with pytest.raises(ValidationError, match="pinned non-latest"):
+        Settings(**values)
+    with pytest.raises(ValidationError, match="pinned non-latest"):
+        Settings(**values, s17_exec_image="node:latest")
+    configured = Settings(**values, s17_exec_image="node:22.20.0-alpine")
+    assert configured.s17_exec_container is True

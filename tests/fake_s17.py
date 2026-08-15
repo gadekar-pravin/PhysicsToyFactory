@@ -1,0 +1,155 @@
+"""Deterministic in-process S17 contract double for product integration tests."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
+
+def unfinished_graph(run_id: str) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "finished": False,
+        "nodes": {},
+        "edges": [],
+        "events": [{"sequence": 1, "kind": "run_started", "node_id": None, "payload": {}}],
+    }
+
+
+def checker_node(command: str, exit_code: int, *, timed_out: bool = False) -> dict[str, Any]:
+    return {
+        "skill": "run_command",
+        "state": "succeeded",
+        "input": {"command": command},
+        "result": {"exit_code": exit_code, "timed_out": timed_out, "stdout": "", "stderr": ""},
+    }
+
+
+def terminal_graph(
+    run_id: str,
+    *,
+    checker_results: tuple[tuple[str, int, bool], ...] = (("node p5check.js sketch.js", 0, False),),
+    answer: bool = True,
+) -> dict[str, Any]:
+    nodes: dict[str, Any] = {}
+    events: list[dict[str, Any]] = [
+        {"sequence": 1, "kind": "run_started", "node_id": None, "payload": {}}
+    ]
+    sequence = 2
+    for index, (command, exit_code, timed_out) in enumerate(checker_results):
+        node_id = f"check_{index}"
+        nodes[node_id] = checker_node(command, exit_code, timed_out=timed_out)
+        events.append(
+            {"sequence": sequence, "kind": "task_succeeded", "node_id": node_id, "payload": {}}
+        )
+        sequence += 1
+    if answer:
+        nodes["answer"] = {
+            "skill": "answer_with_evidence",
+            "state": "succeeded",
+            "input": {"query": "finish"},
+            "result": {"answer": "done"},
+        }
+        events.append(
+            {"sequence": sequence, "kind": "task_succeeded", "node_id": "answer", "payload": {}}
+        )
+    return {"run_id": run_id, "finished": True, "nodes": nodes, "edges": [], "events": events}
+
+
+def sse_for_graph(graph: dict[str, Any], *, include_terminal: bool | None = None) -> bytes:
+    frames = [
+        "id: 1\ndata: "
+        + json.dumps({"type": "RUN_STARTED", "seq": 1, "source_kind": "run_started"})
+        + "\n\n",
+        ": keepalive\n\n",
+    ]
+    terminal = graph["finished"] if include_terminal is None else include_terminal
+    if terminal:
+        frames.append(
+            "data: "
+            + json.dumps({"type": "RUN_FINISHED", "seq": 2, "source_kind": "derived"})
+            + "\n\n"
+        )
+    return "".join(frames).encode()
+
+
+@dataclass
+class FakeS17:
+    """Mutable fake whose execution is completed explicitly by each test."""
+
+    token: str
+    runs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    streams: dict[str, bytes] = field(default_factory=dict)
+    starts: list[dict[str, Any]] = field(default_factory=list)
+    event_queries: list[dict[str, str]] = field(default_factory=list)
+    start_status: int = 202
+    start_body: dict[str, Any] | None = None
+    process_status: int = 200
+    ready_status: int = 200
+    raw_status: int | None = None
+
+    def __post_init__(self) -> None:
+        self.app = FastAPI()
+        self._install_routes()
+
+    def _install_routes(self) -> None:
+        @self.app.get("/healthz")
+        async def health() -> JSONResponse:
+            return JSONResponse(
+                status_code=self.process_status, content={"ok": self.process_status == 200}
+            )
+
+        @self.app.get("/readyz")
+        async def ready() -> JSONResponse:
+            return JSONResponse(
+                status_code=self.ready_status, content={"ok": self.ready_status == 200}
+            )
+
+        @self.app.post("/v1/agent/runs/async")
+        async def start(request: Request, authorization: str | None = Header(default=None)) -> JSONResponse:
+            if authorization != f"Bearer {self.token}":
+                return JSONResponse(status_code=401, content={"detail": "secret upstream body"})
+            body = await request.json()
+            self.starts.append(body)
+            if self.start_status != 202:
+                return JSONResponse(
+                    status_code=self.start_status, content={"detail": "secret upstream body"}
+                )
+            if self.start_body is not None:
+                return JSONResponse(status_code=202, content=self.start_body)
+            run_id = f"run-fake-{len(self.starts)}"
+            self.runs[run_id] = unfinished_graph(run_id)
+            self.streams[run_id] = sse_for_graph(self.runs[run_id])
+            return JSONResponse(
+                status_code=202, content={"run_id": run_id, "status": "accepted"}
+            )
+
+        @self.app.get("/v1/agent/runs/{run_id}")
+        async def raw_run(run_id: str) -> JSONResponse:
+            if self.raw_status is not None:
+                return JSONResponse(
+                    status_code=self.raw_status, content={"detail": "secret raw body"}
+                )
+            graph = self.runs.get(run_id)
+            if graph is None:
+                raise HTTPException(404, "missing")
+            return JSONResponse(status_code=200, content=graph)
+
+        @self.app.get("/v1/runs/{run_id}/events")
+        async def events(run_id: str, request: Request) -> StreamingResponse:
+            self.event_queries.append(dict(request.query_params))
+            if run_id not in self.runs:
+                raise HTTPException(404, "missing")
+
+            async def body():  # type: ignore[no-untyped-def]
+                yield self.streams.get(run_id, sse_for_graph(self.runs[run_id]))
+
+            return StreamingResponse(body(), media_type="text/event-stream")
+
+    def complete(self, run_id: str, graph: dict[str, Any]) -> None:
+        self.runs[run_id] = graph
+        self.streams[run_id] = sse_for_graph(graph)

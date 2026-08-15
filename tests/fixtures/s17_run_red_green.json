@@ -1,1 +1,38 @@
-{}
+{
+  "run_id": "run-recorded-red-green",
+  "finished": true,
+  "nodes": {
+    "check_red": {
+      "skill": "run_command",
+      "state": "succeeded",
+      "input": {"command": "node p5check.js sketch.js"},
+      "result": {"exit_code": 1, "timed_out": false, "stderr": "P5CHECK FAIL"}
+    },
+    "repair": {
+      "skill": "edit_code",
+      "state": "succeeded",
+      "input": {"path": "sketch.js"},
+      "result": {"summary": "anchored edit"}
+    },
+    "check_green": {
+      "skill": "run_command",
+      "state": "succeeded",
+      "input": {"command": "node ./p5check.js ./sketch.js"},
+      "result": {"exit_code": 0, "timed_out": false, "stdout": "P5CHECK PASS frames=5 draw_calls=5"}
+    },
+    "answer": {
+      "skill": "answer_with_evidence",
+      "state": "succeeded",
+      "input": {"query": "finish"},
+      "result": {"answer": "ready"}
+    }
+  },
+  "edges": [],
+  "events": [
+    {"sequence": 1, "kind": "run_started", "node_id": null, "payload": {}},
+    {"sequence": 2, "kind": "task_succeeded", "node_id": "check_red", "payload": {}},
+    {"sequence": 3, "kind": "task_succeeded", "node_id": "repair", "payload": {}},
+    {"sequence": 4, "kind": "task_succeeded", "node_id": "check_green", "payload": {}},
+    {"sequence": 5, "kind": "task_succeeded", "node_id": "answer", "payload": {}}
+  ]
+}

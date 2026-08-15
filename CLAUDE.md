@@ -22,6 +22,13 @@ Phase 1's exact gate is:
 uv run pytest -q tests/test_config.py tests/test_workspace.py tests/test_p5check.py
 ```
 
+Phase 2's exact gate is:
+
+```bash
+uv run ruff check .
+uv run pytest -q tests/test_s17_client.py tests/test_orchestrator.py tests/test_api.py
+```
+
 Node must be available for Phase 1. A skipped checker module is diagnostic only and is not a passing
 phase gate.
 

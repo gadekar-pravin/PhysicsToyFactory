@@ -21,6 +21,8 @@ ENV_TO_FIELD = {
     "PTF_HTTP_READ_TIMEOUT_SECONDS": "http_read_timeout_seconds",
     "PTF_PREVIEW_READY_TIMEOUT_SECONDS": "preview_ready_timeout_seconds",
     "PTF_MAX_SKETCH_BYTES": "max_sketch_bytes",
+    "S17_EXEC_CONTAINER": "s17_exec_container",
+    "S17_EXEC_IMAGE": "s17_exec_image",
 }
 
 
@@ -40,6 +42,8 @@ class Settings(BaseModel):
     http_read_timeout_seconds: float = Field(default=30, gt=0, le=600)
     preview_ready_timeout_seconds: float = Field(default=8, gt=0, le=60)
     max_sketch_bytes: int = Field(default=100_000, ge=1, le=1_000_000)
+    s17_exec_container: bool = False
+    s17_exec_image: str | None = None
 
     @field_validator("host")
     @classmethod
@@ -69,6 +73,10 @@ class Settings(BaseModel):
         artifacts = self.artifact_dir.resolve(strict=False)
         if workspace == artifacts or artifacts.is_relative_to(workspace) or workspace.is_relative_to(artifacts):
             raise ValueError("PTF_WORKSPACE and PTF_ARTIFACT_DIR must be separate directory trees")
+        if self.s17_exec_container:
+            image = (self.s17_exec_image or "").strip()
+            if not image or image.endswith(":latest"):
+                raise ValueError("S17_EXEC_IMAGE must identify a pinned non-latest image in container mode")
         return self
 
 
