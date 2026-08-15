@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Verified Physics Toy</title>
+    <style nonce="__PTF_NONCE__">
+      html, body { margin: 0; overflow: hidden; background: #070b14; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script nonce="__PTF_NONCE__">
+      "use strict";
+      (() => {
+        const previewId = __PTF_PREVIEW_ID_JSON__;
+        const clip = (value) => String(value ?? "Unknown preview error").replace(/[\r\n]+/g, " ").slice(0, 500);
+        const post = (type, message) => parent.postMessage({ type, preview_id: previewId, message }, "*");
+        addEventListener("error", (event) => post("preview_error", clip(event.message)));
+        addEventListener("unhandledrejection", (event) => post("preview_error", clip(event.reason)));
+        addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(() => post("preview_ready", "ready"))));
+      })();
+    </script>
+    <script nonce="__PTF_NONCE__" src="__PTF_P5_URL__"></script>
+    <script nonce="__PTF_NONCE__" src="__PTF_SKETCH_URL__"></script>
+  </body>
+</html>

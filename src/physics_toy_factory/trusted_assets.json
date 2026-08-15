@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "application_id": "physics-toy-factory",
+  "assets": {
+    ".physics-toy-workspace": {
+      "sha256": "878fb6f6a650524cd4bfce0f5bd917cb3321a9066adda54b75c89787673a84ad",
+      "size": 47,
+      "license": "project-internal",
+      "version": "1"
+    },
+    "P5_API.md": {
+      "sha256": "c96e3866831cd46daaa22102b1693485c9c21f121906d6b581755fb0ac08c10b",
+      "size": 3070,
+      "license": "project-internal",
+      "version": "1"
+    },
+    "p5check.js": {
+      "sha256": "339460325d2e6da9caa3b733f9d8d7d272c884fe012a59ff0b8c6e58e6b4d1fe",
+      "size": 13045,
+      "license": "project-internal",
+      "version": "1"
+    },
+    "shell/index.html": {
+      "sha256": "595e3c1714b5b6ada76aae716e433139a955812a2cacdaa0cfa1ed5256b96119",
+      "size": 1193,
+      "license": "project-internal",
+      "version": "1"
+    },
+    "shell/LICENSE.p5js.txt": {
+      "sha256": "eb2f25f8f165d5f20682c1ce7e99ce69144ecfd80fbed8c17dfd327ecd8b6cb6",
+      "size": 24480,
+      "license": "LGPL-2.1",
+      "version": "2.3.1",
+      "upstream_url": "https://raw.githubusercontent.com/processing/p5.js/v2.3.1/license.txt"
+    },
+    "shell/p5.min.js": {
+      "sha256": "35fc6f791abc198b3cb929474950c5e7354a6d1e429dd23b249573ce35c1bee9",
+      "size": 989034,
+      "license": "LGPL-2.1",
+      "version": "2.3.1",
+      "upstream_url": "https://cdn.jsdelivr.net/npm/p5@2.3.1/lib/p5.min.js",
+      "project_url": "https://github.com/processing/p5.js"
+    }
+  }
+}

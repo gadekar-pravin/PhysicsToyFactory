@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "physics-toy-factory"
+version = "0.1.0"
+description = "Governed p5.js toy generation product for S17Code"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116",
+  "httpx>=0.28",
+  "pydantic>=2.11",
+  "python-dotenv>=1.1",
+  "uvicorn>=0.35",
+]
+
+[project.scripts]
+physics-toy-factory = "physics_toy_factory.main:serve"
+
+[dependency-groups]
+dev = [
+  "playwright>=1.54",
+  "pytest>=8.4",
+  "pytest-asyncio>=1.1",
+  "ruff>=0.12",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/physics_toy_factory"]
+
+[tool.hatch.build]
+include = [
+  "src/physics_toy_factory/**/*.py",
+  "src/physics_toy_factory/**/*.html",
+  "src/physics_toy_factory/**/*.css",
+  "src/physics_toy_factory/**/*.js",
+  "src/physics_toy_factory/**/*.json",
+  "src/physics_toy_factory/**/*.md",
+  "src/physics_toy_factory/**/*.txt",
+  "src/physics_toy_factory/**/.physics-toy-workspace",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "browser: browser automation requiring an installed Chromium",
+  "activity: activity-stream browser journey",
+  "preview: verified-preview browser journey",
+  "follow_up: linked follow-up browser journey",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "I"]
