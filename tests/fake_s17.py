@@ -60,6 +60,66 @@ def terminal_graph(
     return {"run_id": run_id, "finished": True, "nodes": nodes, "edges": [], "events": events}
 
 
+def follow_up_graph(run_id: str) -> dict[str, Any]:
+    """Return a linked-run proof with read, one anchored edit, and a green checker."""
+
+    nodes = {
+        "read_existing": {
+            "skill": "read_code",
+            "state": "succeeded",
+            "input": {"path": "sketch.js", "offset": 1, "limit": 200},
+            "result": {
+                "path": "sketch.js",
+                "start_line": 1,
+                "end_line": 8,
+                "total_lines": 8,
+                "truncated": False,
+            },
+        },
+        "anchored_edit": {
+            "skill": "edit_code",
+            "state": "succeeded",
+            "input": {
+                "path": "sketch.js",
+                "old_string": "function draw() {",
+                "new_string": "function draw() {\n  // Render a fading trail.",
+                "replace_all": False,
+            },
+            "result": {
+                "path": "sketch.js",
+                "replaced": 1,
+                "occurrences_found": 1,
+                "bytes_before": 240,
+                "bytes_after": 278,
+            },
+        },
+        "check_green": checker_node("node p5check.js sketch.js", 0),
+        "answer": {
+            "skill": "answer_with_evidence",
+            "state": "succeeded",
+            "input": {"query": "finish"},
+            "result": {"answer": "modified and verified"},
+        },
+    }
+    events = [
+        {"sequence": 1, "kind": "run_started", "node_id": None, "payload": {}},
+        {
+            "sequence": 2,
+            "kind": "graph_patched",
+            "node_id": None,
+            "payload": {"reason": "anchored follow-up", "trigger_event": 1},
+        },
+        {"sequence": 3, "kind": "task_started", "node_id": "read_existing", "payload": {}},
+        {"sequence": 4, "kind": "task_succeeded", "node_id": "read_existing", "payload": {}},
+        {"sequence": 5, "kind": "task_started", "node_id": "anchored_edit", "payload": {}},
+        {"sequence": 6, "kind": "task_succeeded", "node_id": "anchored_edit", "payload": {}},
+        {"sequence": 7, "kind": "task_started", "node_id": "check_green", "payload": {}},
+        {"sequence": 8, "kind": "task_succeeded", "node_id": "check_green", "payload": {}},
+        {"sequence": 9, "kind": "task_succeeded", "node_id": "answer", "payload": {}},
+    ]
+    return {"run_id": run_id, "finished": True, "nodes": nodes, "edges": [], "events": events}
+
+
 def sse_for_graph(graph: dict[str, Any], *, include_terminal: bool | None = None) -> bytes:
     frames = []
     for event in graph["events"]:

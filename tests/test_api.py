@@ -12,9 +12,14 @@ import pytest
 from physics_toy_factory.main import create_app
 from physics_toy_factory.workspace import WorkspaceManager
 from tests.conftest import CONTROL_TOKEN
-from tests.fake_s17 import FakeS17, sse_for_graph, terminal_graph
+from tests.fake_s17 import FakeS17, follow_up_graph, sse_for_graph, terminal_graph
 
 SKETCH = "function setup(){createCanvas(120,80)}\nfunction draw(){background(20);circle(50,40,20)}\n"
+MODIFIED_SKETCH = (
+    "let trailsEnabled = true;\n"
+    "function setup(){createCanvas(120,80)}\n"
+    "function draw(){background(20, 20);circle(50,40,20)}\n"
+)
 
 
 async def _create(product, prompt: str = "Create a small orbit") -> str:
@@ -55,6 +60,8 @@ async def test_main_ui_and_static_assets_are_served_without_preview_execution(pr
     assert page.status_code == script.status_code == styles.status_code == 200
     assert "Physics Toy Factory" in page.text
     assert "Factory activity" in page.text
+    assert 'id="follow-up-form"' in page.text
+    assert 'id="follow-up-panel"' in page.text and "hidden" in page.text
     assert "<iframe" not in page.text
     assert "EventSource" in script.text
     assert "innerHTML" not in script.text
@@ -334,25 +341,70 @@ async def test_tampered_preview_shell_or_runtime_blocks_preview(product, asset: 
 
 
 @pytest.mark.asyncio
-async def test_follow_up_requires_ready_hash_and_uses_narrow_authority_once(product) -> None:
+async def test_follow_up_is_linked_anchored_reverified_and_allowed_only_once(product) -> None:
     early = await product.client.post("/api/runs/follow-up", json={"prompt": "trails"})
     assert early.status_code == 409
     create_id = await _make_ready(product)
+    old_revision = hashlib.sha256(SKETCH.encode()).hexdigest()
     response = await product.client.post("/api/runs/follow-up", json={"prompt": "Add trails"})
     assert response.status_code == 202
     follow_id = response.json()["run_id"]
-    assert product.fake.starts[-1]["allowed_side_effects"] == ["edit_code", "run_command"]
-    assert "Read sketch.js with read_code" in product.fake.starts[-1]["prompt"]
+    start = product.fake.starts[-1]
+    assert start["allowed_side_effects"] == ["edit_code", "run_command"]
+    assert "create_file" not in start["allowed_side_effects"]
+    assert "Read sketch.js with read_code" in start["prompt"]
+    assert "exact unique anchor" in start["prompt"]
     session = (await product.client.get("/api/session")).json()["session"]
     assert session["state"] == "modifying"
     assert session["follow_up_used"] is True
+    assert session["current_sketch_sha256"] is None
     assert session["runs"][-1]["parent_run_id"] == create_id
+    assert session["runs"][-1]["kind"] == "follow_up"
+    blocked_preview = await product.client.post(
+        "/api/preview", json={"revision": old_revision}
+    )
+    assert blocked_preview.status_code == 409
+    assert blocked_preview.json()["error"]["code"] == "preview_not_ready"
 
-    product.fake.complete(follow_id, terminal_graph(follow_id))
-    await product.client.get(f"/api/runs/{follow_id}")
+    product.settings.workspace.joinpath("sketch.js").write_text(
+        MODIFIED_SKETCH, encoding="utf-8"
+    )
+    graph = follow_up_graph(follow_id)
+    product.fake.complete(follow_id, graph)
+    raw = (await product.client.get(f"/api/runs/{follow_id}")).json()
+    ordered_nodes = [
+        event["node_id"]
+        for event in raw["events"]
+        if event["kind"] == "task_succeeded" and event["node_id"] is not None
+    ]
+    assert ordered_nodes.index("read_existing") < ordered_nodes.index("anchored_edit")
+    assert raw["nodes"]["read_existing"]["skill"] == "read_code"
+    assert raw["nodes"]["anchored_edit"]["skill"] == "edit_code"
+    assert raw["nodes"]["anchored_edit"]["result"]["replaced"] == 1
+    assert raw["nodes"]["anchored_edit"]["result"]["occurrences_found"] == 1
+
+    new_revision = hashlib.sha256(MODIFIED_SKETCH.encode()).hexdigest()
+    session = (await product.client.get("/api/session")).json()["session"]
+    assert session["state"] == "ready"
+    assert session["current_sketch_sha256"] == new_revision
+    assert session["runs"][-1]["verified_sketch_sha256"] == new_revision
+    assert session["runs"][-1]["parent_run_id"] == create_id
+    code = (await product.client.get("/api/code")).json()
+    assert code["verified"] is True
+    assert code["verified_run_id"] == follow_id
+    assert "function setup(){createCanvas(120,80)}" in code["content"]
+    assert "trailsEnabled = true" in code["content"]
+    lease = (
+        await product.client.post("/api/preview", json={"revision": new_revision})
+    ).json()
+    assert lease["run_id"] == follow_id
+    assert lease["revision"] != old_revision
+
+    starts_before_retry = len(product.fake.starts)
     second = await product.client.post("/api/runs/follow-up", json={"prompt": "again"})
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "follow_up_used"
+    assert len(product.fake.starts) == starts_before_retry
 
 
 @pytest.mark.asyncio
@@ -364,6 +416,21 @@ async def test_follow_up_rejects_changed_verified_file_without_starting_s17(prod
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "sketch_changed"
     assert len(product.fake.starts) == before
+
+
+@pytest.mark.asyncio
+async def test_rejected_follow_up_start_rolls_back_one_use_slot(product) -> None:
+    create_id = await _make_ready(product)
+    product.fake.start_status = 503
+    response = await product.client.post(
+        "/api/runs/follow-up", json={"prompt": "Add a soft trail"}
+    )
+    assert response.status_code == 503
+    session = (await product.client.get("/api/session")).json()["session"]
+    assert session["state"] == "ready"
+    assert session["active_run_id"] is None
+    assert session["follow_up_used"] is False
+    assert [run["run_id"] for run in session["runs"]] == [create_id]
 
 
 @pytest.mark.asyncio

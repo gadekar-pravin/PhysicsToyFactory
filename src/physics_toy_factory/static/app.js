@@ -26,6 +26,12 @@ const elements = {
   createButton: document.querySelector("#create-button"),
   suggestionList: document.querySelector("#suggestion-list"),
   formError: document.querySelector("#form-error"),
+  followUpPanel: document.querySelector("#follow-up-panel"),
+  followUpForm: document.querySelector("#follow-up-form"),
+  followUpPrompt: document.querySelector("#follow-up-prompt"),
+  followUpCount: document.querySelector("#follow-up-count"),
+  followUpButton: document.querySelector("#follow-up-button"),
+  followUpError: document.querySelector("#follow-up-error"),
   viewCode: document.querySelector("#view-code"),
   viewRun: document.querySelector("#view-run"),
   reset: document.querySelector("#reset-session"),
@@ -57,6 +63,8 @@ const state = {
   previewRunId: null,
   previewWatchdog: null,
   previewTerminal: false,
+  runKind: null,
+  followUpSubmitting: false,
 };
 
 const MODE_COPY = {
@@ -77,6 +85,12 @@ const MODE_COPY = {
     overline: "Agent run in progress",
     title: "The workshop is in motion.",
     description: "Follow the journal-backed activity at right while the sketch is written and checked.",
+  },
+  modifying: {
+    label: "Modifying",
+    overline: "Linked run in progress",
+    title: "The verified toy is being refined.",
+    description: "The old preview is closed while the agent reads, anchor-edits, and checks the sketch again.",
   },
   ready: {
     label: "Verified",
@@ -120,10 +134,18 @@ function activeRun() {
 
 function updateControls() {
   const mode = elements.app.dataset.state;
-  const mutating = ["connecting", "running", "reconnecting"].includes(mode) || activeRun();
+  const mutating = ["connecting", "running", "modifying", "reconnecting"].includes(mode) || activeRun();
   const canCreate = mode === "landing" && state.healthReady && state.session?.state === "empty";
+  const canFollowUp = mode === "ready"
+    && state.session?.state === "ready"
+    && state.session?.follow_up_used === false
+    && !state.followUpSubmitting
+    && !activeRun();
   elements.createButton.disabled = !canCreate;
   elements.prompt.disabled = !canCreate;
+  elements.followUpPanel.hidden = !canFollowUp;
+  elements.followUpPrompt.disabled = !canFollowUp;
+  elements.followUpButton.disabled = !canFollowUp;
   elements.reset.disabled = mutating || !state.session || state.session.state === "empty";
   elements.viewRun.disabled = !state.runId;
   elements.viewCode.disabled = !state.runId;
@@ -336,6 +358,16 @@ function clearFormError() {
   elements.formError.hidden = true;
 }
 
+function showFollowUpError(message) {
+  elements.followUpError.textContent = message;
+  elements.followUpError.hidden = false;
+}
+
+function clearFollowUpError() {
+  elements.followUpError.textContent = "";
+  elements.followUpError.hidden = true;
+}
+
 function boundedDetail(value) {
   if (typeof value !== "string") {
     return "";
@@ -386,6 +418,10 @@ function renderSuggestions(suggestions) {
 
 function updatePromptCount() {
   elements.promptCount.textContent = String(elements.prompt.value.length);
+}
+
+function updateFollowUpCount() {
+  elements.followUpCount.textContent = String(elements.followUpPrompt.value.length);
 }
 
 function clearActivity() {
@@ -439,8 +475,9 @@ function appendActivity(evidence, presentation) {
   elements.activityList.scrollTop = elements.activityList.scrollHeight;
 }
 
-function resetRunState(runId) {
+function resetRunState(runId, runKind = "create") {
   state.runId = runId;
+  state.runKind = runKind;
   state.seen = new Set();
   state.graph = null;
   state.nodeCache = new Map();
@@ -609,6 +646,7 @@ async function refreshSession() {
 
 async function finishRun(event, evidence) {
   state.terminal = true;
+  state.followUpSubmitting = false;
   if (state.eventSource) {
     state.eventSource.close();
     state.eventSource = null;
@@ -684,12 +722,14 @@ function parseEventData(message) {
   }
 }
 
-function connectRun(runId) {
+function connectRun(runId, runKind = state.runKind || "create") {
   if (state.eventSource) {
     state.eventSource.close();
   }
   if (state.runId !== runId) {
-    resetRunState(runId);
+    resetRunState(runId, runKind);
+  } else {
+    state.runKind = runKind;
   }
   state.terminal = false;
   setMode("connecting");
@@ -703,7 +743,7 @@ function connectRun(runId) {
     }
     elements.transportState.textContent = "";
     state.reconnecting = false;
-    setMode("running");
+    setMode(state.runKind === "follow_up" ? "modifying" : "running");
   };
   source.onmessage = parseEventData;
   source.addEventListener("transport_error", (message) => {
@@ -753,8 +793,8 @@ async function startCreate(event) {
       state: "running",
       active_run_id: payload.run_id,
     };
-    resetRunState(payload.run_id);
-    connectRun(payload.run_id);
+    resetRunState(payload.run_id, "create");
+    connectRun(payload.run_id, "create");
   } catch (error) {
     showFormError(error.message || "The factory could not start this run.");
     try {
@@ -764,6 +804,68 @@ async function startCreate(event) {
     }
     const resetRequired = state.session?.state === "reset_required";
     setMode(resetRequired ? "failed" : (state.healthReady ? "landing" : "degraded"));
+  }
+}
+
+async function startFollowUp(event) {
+  event.preventDefault();
+  clearFollowUpError();
+  const prompt = elements.followUpPrompt.value.trim();
+  if (!prompt) {
+    showFollowUpError("Describe the one change you want to make.");
+    elements.followUpPrompt.focus();
+    return;
+  }
+
+  state.followUpSubmitting = true;
+  updateControls();
+  destroyPreview();
+  setPreviewState("locked");
+  setMode("modifying");
+  try {
+    const payload = await requestJson("/api/runs/follow-up", {
+      method: "POST",
+      body: JSON.stringify({prompt}),
+    });
+    state.followUpSubmitting = false;
+    state.session = {
+      ...state.session,
+      state: "modifying",
+      active_run_id: payload.run_id,
+      current_sketch_sha256: null,
+      follow_up_used: true,
+    };
+    resetRunState(payload.run_id, "follow_up");
+    connectRun(payload.run_id, "follow_up");
+  } catch (error) {
+    state.followUpSubmitting = false;
+    let refreshed = false;
+    try {
+      await refreshSession();
+      refreshed = true;
+    } catch (_refreshError) {
+      // The bounded start error remains the actionable message.
+    }
+    const activeId = refreshed ? state.session?.active_run_id : null;
+    if (typeof activeId === "string") {
+      const linked = state.session.runs?.find((run) => run.run_id === activeId);
+      resetRunState(activeId, linked?.kind || "follow_up");
+      connectRun(activeId, linked?.kind || "follow_up");
+      showBanner("The linked run was already accepted; reconnecting to its journal.");
+      return;
+    }
+    if (
+      refreshed
+      && state.session?.state === "ready"
+      && typeof state.session.current_sketch_sha256 === "string"
+    ) {
+      setMode("ready");
+      showFollowUpError(error.message || "The factory could not start the modification.");
+      await mountPreview();
+      return;
+    }
+    showBanner(error.message || "The factory could not start the modification.");
+    setMode("failed");
   }
 }
 
@@ -812,12 +914,17 @@ async function resetSession() {
     destroyPreview();
     setPreviewState("locked");
     state.runId = null;
+    state.runKind = null;
+    state.followUpSubmitting = false;
     state.graph = null;
     state.nodeCache = new Map();
     state.seen = new Set();
     clearActivity();
     elements.prompt.value = "";
+    elements.followUpPrompt.value = "";
     updatePromptCount();
+    updateFollowUpCount();
+    clearFollowUpError();
     hideBanner();
     setMode(state.healthReady ? "landing" : "degraded");
   } catch (error) {
@@ -826,9 +933,12 @@ async function resetSession() {
   }
 }
 
-function latestRunId(session) {
+function latestRun(session) {
   const runs = Array.isArray(session?.runs) ? session.runs : [];
-  return session?.active_run_id || runs.at(-1)?.run_id || null;
+  if (session?.active_run_id) {
+    return runs.find((run) => run.run_id === session.active_run_id) || null;
+  }
+  return runs.at(-1) || null;
 }
 
 async function boot() {
@@ -847,10 +957,10 @@ async function boot() {
       showBanner("S17 or the trusted workspace is not ready. Creation is disabled.");
     }
 
-    const runId = latestRunId(state.session);
-    if (runId) {
-      resetRunState(runId);
-      connectRun(runId);
+    const run = latestRun(state.session);
+    if (run) {
+      resetRunState(run.run_id, run.kind);
+      connectRun(run.run_id, run.kind);
       return;
     }
     if (!state.healthReady) {
@@ -869,6 +979,8 @@ async function boot() {
 
 elements.form.addEventListener("submit", startCreate);
 elements.prompt.addEventListener("input", updatePromptCount);
+elements.followUpForm.addEventListener("submit", startFollowUp);
+elements.followUpPrompt.addEventListener("input", updateFollowUpCount);
 elements.viewCode.addEventListener("click", openCodeDialog);
 elements.viewRun.addEventListener("click", openRunDialog);
 elements.reset.addEventListener("click", resetSession);
@@ -889,4 +1001,5 @@ window.addEventListener("pagehide", () => {
 });
 
 updatePromptCount();
+updateFollowUpCount();
 boot();

@@ -325,8 +325,10 @@ a:focus-visible {
 }
 
 [data-state="running"] .state-badge span,
+[data-state="modifying"] .state-badge span,
 [data-state="ready"] .state-badge span,
-[data-state="running"] .live-indicator i {
+[data-state="running"] .live-indicator i,
+[data-state="modifying"] .live-indicator i {
   background: var(--mint);
 }
 
@@ -665,6 +667,82 @@ a:focus-visible {
   box-shadow: var(--shadow);
 }
 
+.follow-up-panel {
+  position: relative;
+  margin-top: 18px;
+  padding: 20px 22px 18px;
+  overflow: hidden;
+  color: var(--cream);
+  background:
+    radial-gradient(circle at 92% 0, rgba(129, 185, 156, 0.2), transparent 19rem),
+    var(--navy);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: var(--shadow);
+}
+
+.follow-up-heading,
+.follow-up-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.follow-up-heading h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.35rem;
+  font-weight: 400;
+}
+
+.follow-up-heading .panel-kicker {
+  color: var(--mint);
+}
+
+.follow-up-badge {
+  padding: 8px 10px;
+  color: var(--navy);
+  background: var(--mint);
+  border-radius: 99px;
+  font: 800 0.57rem/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.follow-up-copy {
+  max-width: 780px;
+  margin: 10px 0 14px;
+  color: #c7d1d3;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.follow-up-box {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.23);
+}
+
+.follow-up-box textarea {
+  min-height: 74px;
+  color: var(--white);
+}
+
+.follow-up-box textarea::placeholder {
+  color: #93a2a7;
+}
+
+.follow-up-meta {
+  margin-top: 10px;
+  color: #93a2a7;
+  font: 700 0.56rem/1.35 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.follow-up-panel .form-error {
+  color: #ff9c7c;
+}
+
 .prompt-heading {
   margin-bottom: 13px;
   display: flex;
@@ -956,6 +1034,7 @@ footer {
   }
 
   .prompt-panel,
+  .follow-up-panel,
   .panel-heading {
     padding-inline: 15px;
   }
@@ -970,6 +1049,11 @@ footer {
   }
 
   .suggestions {
+    align-items: flex-start;
+  }
+
+  .follow-up-heading,
+  .follow-up-meta {
     align-items: flex-start;
   }
 

@@ -6,12 +6,15 @@ adds the process-local session and S17 orchestration. Phase 3 adds the responsiv
 journal-backed activity. Phase 4 adds the exact-hash preview gate, nonce-protected trusted shell,
 sandboxed iframe, browser-error capture, and readiness watchdog.
 
+Phase 5 adds the single linked follow-up control, narrower edit-only authority, fresh recorded
+read/edit/check activity, and verified preview revision replacement.
+
 ## Prerequisites
 
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - Node.js 20 or newer available as `node`
-- Playwright Chromium for the Phase 3 and Phase 4 browser gates
+- Playwright Chromium for the Phase 3 through Phase 5 browser gates
 
 Node is an external runtime prerequisite. There is intentionally no npm project, JavaScript package
 manager, frontend build, or runtime CDN dependency.
@@ -108,6 +111,20 @@ parent-DOM, popup, and top-navigation attempts fail; wrong-window and wrong-prev
 ignored; a genuine runtime error is recorded without a repair run; and an unresponsive iframe is
 destroyed by the configured watchdog.
 
+## Phase 5 deterministic gate
+
+```bash
+uv run ruff check .
+uv run pytest -q -m "not browser"
+uv run pytest -q -m browser tests/test_browser.py
+```
+
+The linked follow-up journey proves that the old preview is removed before modification, the new
+S17 run is linked to the preceding successful run, and its authority contains exactly `edit_code`
+and `run_command`. The fake raw graph records `read_code` before one anchored `edit_code` result,
+then a passing checker. The original interaction remains in the resulting source and preview, a new
+verified revision replaces the old iframe, and a second follow-up is rejected without starting S17.
+
 ## Trusted fixture
 
 The packaged fixture contains the workspace marker, `P5_API.md`, `p5check.js`, and the entire iframe
@@ -144,6 +161,6 @@ sandboxed.
 
 ## Phase boundary
 
-Phase 4 does not implement Phase 5 follow-up controls, automatic browser repair, Surprise Me, skill
-A/B, or planted-refusal demonstrations. Follow-up backend authority and linking are present for the
-later UI, but a browser-only failure is displayed and recorded without starting another S17 run.
+Phase 5 does not implement Phase 6 live qualification, retained grading evidence, automatic browser
+repair, Surprise Me, skill A/B, or planted-refusal demonstrations. A browser-only failure remains
+display-only and never starts another S17 run.

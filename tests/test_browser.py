@@ -1,4 +1,4 @@
-"""Phase 3 browser journeys against the product and deterministic fake S17."""
+"""Phase 3-5 browser journeys against the product and deterministic fake S17."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import uvicorn
 from playwright.async_api import Page, Route, async_playwright, expect
 
 from physics_toy_factory.main import create_app
-from tests.fake_s17 import FakeS17, sse_for_graph
+from tests.fake_s17 import FakeS17, follow_up_graph, sse_for_graph
 
 SKETCH_WITH_UNTRUSTED_TEXT = """let ball;
 function setup() { createCanvas(640, 420); ball = 20; }
@@ -61,6 +61,27 @@ function draw() {
 }
 
 function mousePressed() { clicks += 1; }
+"""
+
+INITIAL_FOLLOW_UP_SKETCH = """let angle = 0;
+function setup() { createCanvas(640, 420); }
+function draw() {
+  background(10, 18, 30);
+  circle(320 + cos(angle) * 90, 210 + sin(angle) * 90, 34);
+  angle += 0.02;
+}
+function mousePressed() { angle = 0; }
+"""
+
+MODIFIED_FOLLOW_UP_SKETCH = """let trailsEnabled = true;
+let angle = 0;
+function setup() { createCanvas(640, 420); }
+function draw() {
+  background(10, 18, 30, trailsEnabled ? 22 : 255);
+  circle(320 + cos(angle) * 90, 210 + sin(angle) * 90, 34);
+  angle += 0.02;
+}
+function mousePressed() { angle = 0; }
 """
 
 
@@ -439,3 +460,107 @@ async def test_preview_watchdog_destroys_unresponsive_frame_and_records_failure(
     assert session["session"]["state"] == "failed"
     assert session["session"]["browser_error"]["name"] == "PreviewTimeout"
     assert len(fake_s17.starts) == 1
+
+
+@pytest.mark.browser
+@pytest.mark.follow_up
+@pytest.mark.asyncio
+async def test_one_linked_follow_up_replaces_preview_after_read_edit_check(
+    browser_page: Page,
+    live_product: str,
+    fake_s17: FakeS17,
+    settings,
+    recorded_graph: dict,
+) -> None:
+    def finish(run_id: str) -> None:
+        if len(fake_s17.starts) == 1:
+            settings.workspace.joinpath("sketch.js").write_text(
+                INITIAL_FOLLOW_UP_SKETCH, encoding="utf-8"
+            )
+            graph = copy.deepcopy(recorded_graph)
+            graph["run_id"] = run_id
+            fake_s17.complete(run_id, graph)
+            return
+        assert settings.workspace.joinpath("sketch.js").read_text(
+            encoding="utf-8"
+        ) == INITIAL_FOLLOW_UP_SKETCH
+        settings.workspace.joinpath("sketch.js").write_text(
+            MODIFIED_FOLLOW_UP_SKETCH, encoding="utf-8"
+        )
+        fake_s17.complete(run_id, follow_up_graph(run_id))
+
+    fake_s17.on_start = finish
+    await browser_page.goto(live_product)
+    await browser_page.locator("#prompt").fill("A planet that orbits when I click")
+    await browser_page.locator("#create-button").click()
+    await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
+        "data-preview-state", "ready"
+    )
+    await expect(browser_page.locator("#follow-up-panel")).to_be_visible()
+    initial_frame_element = browser_page.locator("#preview-host iframe")
+    initial_src = await initial_frame_element.get_attribute("src")
+    assert initial_src is not None
+    initial_frame = browser_page.frame(url=re.compile(r"/preview/[0-9a-f]{64}"))
+    assert initial_frame is not None
+    assert await initial_frame.evaluate("typeof mousePressed === 'function'") is True
+    assert await initial_frame.evaluate("angle = 1; mousePressed(); angle") == 0
+
+    request_seen = asyncio.Event()
+    release_request = asyncio.Event()
+
+    async def hold_follow_up(route: Route) -> None:
+        request_seen.set()
+        await release_request.wait()
+        await route.continue_()
+
+    await browser_page.route("**/api/runs/follow-up", hold_follow_up)
+    await browser_page.locator("#follow-up-prompt").fill(
+        "Make the planet leave a glowing trail"
+    )
+    await browser_page.locator("#follow-up-button").click()
+    await asyncio.wait_for(request_seen.wait(), timeout=1)
+    assert await browser_page.locator("#preview-host iframe").count() == 0
+    await expect(browser_page.locator("#follow-up-button")).to_be_disabled()
+    await expect(browser_page.locator("#follow-up-panel")).to_be_hidden()
+    await expect(browser_page.locator("#app")).to_have_attribute("data-state", "modifying")
+    release_request.set()
+
+    await expect(browser_page.locator("#app")).to_have_attribute("data-state", "ready")
+    await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
+        "data-preview-state", "ready"
+    )
+    await expect(browser_page.locator("#follow-up-panel")).to_be_hidden()
+    row_text = "\n".join(await browser_page.locator(".activity-item").all_text_contents())
+    for expected in (
+        "Starting the factory",
+        "Reading the current sketch",
+        "Updating sketch.js",
+        "Judging the simulation",
+        "Check passed",
+        "Simulation ready",
+    ):
+        assert expected in row_text
+    assert "Writing sketch.js" not in row_text
+
+    modified_frame_element = browser_page.locator("#preview-host iframe")
+    modified_src = await modified_frame_element.get_attribute("src")
+    assert modified_src is not None
+    assert modified_src != initial_src
+    modified_frame = browser_page.frame(url=re.compile(r"/preview/[0-9a-f]{64}"))
+    assert modified_frame is not None
+    assert await modified_frame.evaluate("trailsEnabled") is True
+    assert await modified_frame.evaluate("angle = 1; mousePressed(); angle") == 0
+
+    assert len(fake_s17.starts) == 2
+    assert fake_s17.starts[1]["allowed_side_effects"] == ["edit_code", "run_command"]
+    assert "create_file" not in fake_s17.starts[1]["allowed_side_effects"]
+    session = await browser_page.evaluate("fetch('/api/session').then(response => response.json())")
+    runs = session["session"]["runs"]
+    assert session["session"]["follow_up_used"] is True
+    assert runs[1]["kind"] == "follow_up"
+    assert runs[1]["parent_run_id"] == runs[0]["run_id"]
+
+    code = await browser_page.evaluate("fetch('/api/code').then(response => response.json())")
+    assert code["verified"] is True
+    assert "function mousePressed() { angle = 0; }" in code["content"]
+    assert "trailsEnabled = true" in code["content"]

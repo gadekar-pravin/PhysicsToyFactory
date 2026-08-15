@@ -150,6 +150,42 @@
           </div>
           <p class="form-error" id="form-error" role="alert" hidden></p>
         </section>
+
+        <section class="follow-up-panel" id="follow-up-panel" aria-labelledby="follow-up-title" hidden>
+          <div class="follow-up-heading">
+            <div>
+              <p class="panel-kicker">One linked modification</p>
+              <h2 id="follow-up-title">Refine the verified toy</h2>
+            </div>
+            <span class="follow-up-badge">One edit available</span>
+          </div>
+          <p class="follow-up-copy">
+            The factory will read the current sketch, make one anchored change, check it again,
+            and replace the preview only after the new revision passes.
+          </p>
+          <form id="follow-up-form">
+            <label class="sr-only" for="follow-up-prompt">Describe one modification</label>
+            <div class="prompt-box follow-up-box">
+              <textarea
+                id="follow-up-prompt"
+                name="prompt"
+                maxlength="4000"
+                rows="2"
+                placeholder="Make the planets leave glowing trails..."
+                required
+              ></textarea>
+              <button class="button button-primary" id="follow-up-button" type="submit">
+                <span>Apply one change</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h13m-5-5 5 5-5 5"/></svg>
+              </button>
+            </div>
+          </form>
+          <div class="follow-up-meta">
+            <span>The current preview closes while verification runs.</span>
+            <span><strong id="follow-up-count">0</strong> / 4000</span>
+          </div>
+          <p class="form-error" id="follow-up-error" role="alert" hidden></p>
+        </section>
       </main>
 
       <footer>
