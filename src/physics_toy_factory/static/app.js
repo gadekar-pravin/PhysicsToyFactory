@@ -9,6 +9,11 @@ const elements = {
   stageOverline: document.querySelector("#stage-overline"),
   stageTitle: document.querySelector("#stage-title"),
   stageDescription: document.querySelector("#stage-description"),
+  simulationStage: document.querySelector("#simulation-stage"),
+  previewHost: document.querySelector("#preview-host"),
+  previewStatus: document.querySelector("#preview-status"),
+  previewStatusText: document.querySelector("#preview-status-text"),
+  stageLockText: document.querySelector("#stage-lock-text"),
   systemBanner: document.querySelector("#system-banner"),
   systemBannerText: document.querySelector("#system-banner-text"),
   transportState: document.querySelector("#transport-state"),
@@ -47,6 +52,11 @@ const state = {
   terminal: false,
   reconnecting: false,
   evidenceRows: 0,
+  previewFrame: null,
+  previewId: null,
+  previewRunId: null,
+  previewWatchdog: null,
+  previewTerminal: false,
 };
 
 const MODE_COPY = {
@@ -54,7 +64,7 @@ const MODE_COPY = {
     label: "Ready",
     overline: "Factory standing by",
     title: "Your physics toy will take shape here.",
-    description: "Start with a prompt below. Preview execution stays locked until the verified-preview phase.",
+    description: "Start with a prompt below. Only a checker-verified sketch can enter the preview cage.",
   },
   connecting: {
     label: "Connecting",
@@ -71,8 +81,8 @@ const MODE_COPY = {
   ready: {
     label: "Verified",
     overline: "Checker passed",
-    title: "The sketch is verified and ready.",
-    description: "Source and run evidence are available above. Browser preview remains locked until Phase 4.",
+    title: "Opening the verified preview cage.",
+    description: "The exact passing sketch is loading under the local sandbox and nonce policy.",
   },
   failed: {
     label: "Stopped",
@@ -130,6 +140,190 @@ function showBanner(message) {
 function hideBanner() {
   elements.systemBanner.hidden = true;
   elements.systemBannerText.textContent = "";
+}
+
+function clearPreviewWatchdog() {
+  if (state.previewWatchdog !== null) {
+    window.clearTimeout(state.previewWatchdog);
+    state.previewWatchdog = null;
+  }
+}
+
+function destroyPreview() {
+  clearPreviewWatchdog();
+  state.previewFrame?.remove();
+  state.previewFrame = null;
+  state.previewId = null;
+  state.previewRunId = null;
+  state.previewTerminal = false;
+  elements.previewHost.replaceChildren();
+  elements.previewHost.hidden = true;
+}
+
+function setPreviewState(previewState, message = "") {
+  elements.simulationStage.dataset.previewState = previewState;
+  elements.previewStatusText.textContent = message;
+  elements.previewStatus.hidden = !message;
+  if (previewState === "ready") {
+    elements.stageLockText.textContent = "Verified cage active";
+  } else if (["error", "timeout"].includes(previewState)) {
+    elements.stageLockText.textContent = "Preview cage stopped";
+  } else if (previewState === "loading") {
+    elements.stageLockText.textContent = "Opening verified cage";
+  } else {
+    elements.stageLockText.textContent = "Preview cage locked";
+  }
+}
+
+function exactKeys(value, expected) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function validPreviewMessage(value) {
+  if (exactKeys(value, ["type", "preview_id"])) {
+    return value.type === "preview_ready"
+      && typeof value.preview_id === "string"
+      && value.preview_id === state.previewId;
+  }
+  if (!exactKeys(value, ["type", "preview_id", "name", "message", "line", "column"])) {
+    return false;
+  }
+  return value.type === "preview_error"
+    && typeof value.preview_id === "string"
+    && value.preview_id === state.previewId
+    && typeof value.name === "string"
+    && value.name.length >= 1
+    && value.name.length <= 100
+    && typeof value.message === "string"
+    && value.message.length >= 1
+    && value.message.length <= 500
+    && Number.isInteger(value.line)
+    && value.line >= 0
+    && value.line <= 1000000
+    && Number.isInteger(value.column)
+    && value.column >= 0
+    && value.column <= 1000000;
+}
+
+async function reportPreviewFailure(error) {
+  if (!state.previewRunId || !state.previewId) {
+    return;
+  }
+  const runId = state.previewRunId;
+  const payload = {
+    preview_id: state.previewId,
+    name: boundedDetail(error.name || "Error").slice(0, 100) || "Error",
+    message: boundedDetail(error.message || "Unknown preview error").slice(0, 500),
+    line: Number.isInteger(error.line) ? error.line : 0,
+    column: Number.isInteger(error.column) ? error.column : 0,
+  };
+  const response = await requestJson(`/api/runs/${encodeURIComponent(runId)}/browser-error`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  state.session = response.session;
+}
+
+function showPreviewFailure(message, previewState = "error") {
+  setMode("failed");
+  elements.stageOverline.textContent = "Browser cage stopped";
+  elements.stageTitle.textContent = "The verified sketch failed in the browser.";
+  elements.stageDescription.textContent = message;
+  setPreviewState(previewState, previewState === "timeout" ? "Preview timeout" : "Runtime error");
+  showBanner(message);
+}
+
+async function failPreview(error, previewState = "error") {
+  if (state.previewTerminal) {
+    return;
+  }
+  state.previewTerminal = true;
+  clearPreviewWatchdog();
+  const message = previewState === "timeout"
+    ? "Preview did not become responsive."
+    : boundedDetail(`${error.name || "Error"}: ${error.message || "Unknown preview error"}`);
+  try {
+    await reportPreviewFailure(error);
+  } catch (_reportError) {
+    showBanner("The preview stopped, but its failure could not be recorded.");
+  }
+  state.previewFrame?.remove();
+  state.previewFrame = null;
+  elements.previewHost.replaceChildren();
+  elements.previewHost.hidden = true;
+  showPreviewFailure(message, previewState);
+  updateControls();
+}
+
+function handlePreviewMessage(event) {
+  if (!state.previewFrame || event.source !== state.previewFrame.contentWindow) {
+    return;
+  }
+  if (!validPreviewMessage(event.data) || state.previewTerminal) {
+    return;
+  }
+  if (event.data.type === "preview_ready") {
+    clearPreviewWatchdog();
+    setPreviewState("ready", "Verified preview live");
+    elements.stageOverline.textContent = "Sandbox responsive";
+    elements.stageTitle.textContent = "Your verified physics toy is live.";
+    elements.stageDescription.textContent = "The sketch is running inside the constrained preview cage.";
+    return;
+  }
+  void failPreview(event.data);
+}
+
+async function mountPreview() {
+  destroyPreview();
+  setPreviewState("loading", "Checking verified revision");
+  const revision = state.session?.current_sketch_sha256;
+  if (typeof revision !== "string") {
+    showPreviewFailure("No verified sketch revision is available.");
+    return;
+  }
+  try {
+    const lease = await requestJson("/api/preview", {
+      method: "POST",
+      body: JSON.stringify({revision}),
+    });
+    if (
+      !lease
+      || typeof lease.preview_id !== "string"
+      || typeof lease.run_id !== "string"
+      || lease.revision !== revision
+      || typeof lease.url !== "string"
+      || !Number.isInteger(lease.ready_timeout_ms)
+      || lease.ready_timeout_ms < 1
+    ) {
+      throw new Error("The preview lease response was invalid.");
+    }
+    state.previewId = lease.preview_id;
+    state.previewRunId = lease.run_id;
+    state.previewTerminal = false;
+    const frame = document.createElement("iframe");
+    frame.title = "Verified physics toy preview";
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.referrerPolicy = "no-referrer";
+    state.previewFrame = frame;
+    elements.previewHost.hidden = false;
+    elements.previewHost.replaceChildren(frame);
+    setPreviewState("loading", "Starting verified cage");
+    state.previewWatchdog = window.setTimeout(() => {
+      void failPreview(
+        {name: "PreviewTimeout", message: "Preview did not become responsive.", line: 0, column: 0},
+        "timeout",
+      );
+    }, lease.ready_timeout_ms);
+    frame.src = lease.url;
+  } catch (error) {
+    destroyPreview();
+    showPreviewFailure(error.message || "The verified preview could not be opened.");
+  }
 }
 
 function showFormError(message) {
@@ -433,6 +627,9 @@ async function finishRun(event, evidence) {
   });
   setMode(ready ? "ready" : "failed");
   updateControls();
+  if (ready) {
+    await mountPreview();
+  }
 }
 
 async function processEvent(event) {
@@ -543,6 +740,8 @@ async function startCreate(event) {
     return;
   }
   setMode("connecting");
+  destroyPreview();
+  setPreviewState("locked");
   elements.createButton.disabled = true;
   try {
     const payload = await requestJson("/api/runs", {
@@ -610,6 +809,8 @@ async function resetSession() {
       state.eventSource = null;
     }
     state.session = payload.session;
+    destroyPreview();
+    setPreviewState("locked");
     state.runId = null;
     state.graph = null;
     state.nodeCache = new Map();
@@ -681,7 +882,11 @@ for (const dialog of document.querySelectorAll("dialog")) {
     }
   });
 }
-window.addEventListener("pagehide", () => state.eventSource?.close());
+window.addEventListener("message", handlePreviewMessage);
+window.addEventListener("pagehide", () => {
+  state.eventSource?.close();
+  destroyPreview();
+});
 
 updatePromptCount();
 boot();

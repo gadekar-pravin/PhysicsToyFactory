@@ -14,14 +14,33 @@
       "use strict";
       (() => {
         const previewId = __PTF_PREVIEW_ID_JSON__;
-        const clip = (value) => String(value ?? "Unknown preview error").replace(/[\r\n]+/g, " ").slice(0, 500);
-        const post = (type, message) => parent.postMessage({ type, preview_id: previewId, message }, "*");
-        addEventListener("error", (event) => post("preview_error", clip(event.message)));
-        addEventListener("unhandledrejection", (event) => post("preview_error", clip(event.reason)));
-        addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(() => post("preview_ready", "ready"))));
+        let failed = false;
+        const clip = (value, fallback) => String(value ?? fallback).replace(/[\r\n]+/g, " ").slice(0, 500);
+        const coordinate = (value) => Number.isInteger(value) && value >= 0 ? Math.min(value, 1000000) : 0;
+        const postError = (name, message, line, column) => {
+          if (failed) return;
+          failed = true;
+          parent.postMessage({
+            type: "preview_error",
+            preview_id: previewId,
+            name: clip(name, "Error").slice(0, 100),
+            message: clip(message, "Unknown preview error"),
+            line: coordinate(line),
+            column: coordinate(column),
+          }, "*");
+        };
+        addEventListener("error", (event) => {
+          postError(event.error?.name || "Error", event.message, event.lineno, event.colno);
+        }, true);
+        addEventListener("unhandledrejection", (event) => {
+          postError(event.reason?.name || "UnhandledRejection", event.reason?.message || event.reason, 0, 0);
+        }, true);
+        addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (!failed) parent.postMessage({ type: "preview_ready", preview_id: previewId }, "*");
+        })));
       })();
     </script>
-    <script nonce="__PTF_NONCE__" src="__PTF_P5_URL__"></script>
-    <script nonce="__PTF_NONCE__" src="__PTF_SKETCH_URL__"></script>
+    <script nonce="__PTF_NONCE__" crossorigin="anonymous" src="__PTF_P5_URL__"></script>
+    <script nonce="__PTF_NONCE__" crossorigin="anonymous" src="__PTF_SKETCH_URL__"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-"""FastAPI entrypoint and browser-safe Phase 2 product API."""
+"""FastAPI entrypoint and browser-safe product API."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from physics_toy_factory import __version__
 from physics_toy_factory.config import Settings, load_settings
 from physics_toy_factory.errors import ProductError
-from physics_toy_factory.models import PromptBody
+from physics_toy_factory.models import BrowserErrorBody, PreviewLeaseBody, PromptBody
 from physics_toy_factory.orchestrator import Orchestrator
 from physics_toy_factory.s17_client import S17Client
 from physics_toy_factory.session import SessionService
@@ -33,6 +33,34 @@ SUGGESTED_PROMPTS = [
 ]
 log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).with_name("static")
+
+
+def _preview_headers(nonce: str) -> dict[str, str]:
+    return {
+        "Content-Security-Policy": (
+            "default-src 'none'; "
+            f"script-src 'nonce-{nonce}'; "
+            "connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; "
+            "font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; "
+            "worker-src 'none'; base-uri 'none'; form-action 'none'; navigate-to 'none'; "
+            "frame-ancestors 'self'"
+        ),
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Permissions-Policy": (
+            "camera=(), display-capture=(), geolocation=(), microphone=(), payment=(), usb=()"
+        ),
+    }
+
+
+def _javascript_headers() -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+    }
 
 
 def create_app(
@@ -239,6 +267,53 @@ def create_app(
     async def code(request: Request) -> dict[str, Any]:
         result = await request.app.state.orchestrator.code()
         return result.model_dump(mode="json")
+
+    @app.post("/api/preview")
+    async def prepare_preview(body: PreviewLeaseBody, request: Request) -> dict[str, object]:
+        return await request.app.state.orchestrator.prepare_preview(body.revision)
+
+    @app.get("/preview/{verified_sha256}", include_in_schema=False)
+    async def preview(
+        verified_sha256: str, preview_id: str, request: Request
+    ) -> HTMLResponse:
+        content, nonce = await request.app.state.orchestrator.preview_shell(
+            revision=verified_sha256,
+            preview_id=preview_id,
+        )
+        return HTMLResponse(content, headers=_preview_headers(nonce))
+
+    @app.get("/api/preview/p5.min.js", include_in_schema=False)
+    async def preview_p5(revision: str, preview_id: str, request: Request) -> Response:
+        content = await request.app.state.orchestrator.preview_javascript(
+            revision=revision,
+            preview_id=preview_id,
+            asset="p5.min.js",
+        )
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers=_javascript_headers(),
+        )
+
+    @app.get("/api/preview/sketch.js", include_in_schema=False)
+    async def preview_sketch(revision: str, preview_id: str, request: Request) -> Response:
+        content = await request.app.state.orchestrator.preview_javascript(
+            revision=revision,
+            preview_id=preview_id,
+            asset="sketch.js",
+        )
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers=_javascript_headers(),
+        )
+
+    @app.post("/api/runs/{run_id}/browser-error")
+    async def browser_error(
+        run_id: str, body: BrowserErrorBody, request: Request
+    ) -> dict[str, Any]:
+        record = await request.app.state.orchestrator.browser_error(run_id=run_id, body=body)
+        return {"session": record.model_dump(mode="json")}
 
     return app
 

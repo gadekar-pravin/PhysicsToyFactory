@@ -348,6 +348,66 @@ a:focus-visible {
     var(--navy);
 }
 
+.preview-host {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  background: #070b14;
+}
+
+.preview-host iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  background: #070b14;
+}
+
+.preview-status {
+  position: absolute;
+  z-index: 6;
+  top: 16px;
+  left: 16px;
+  padding: 8px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cream);
+  background: rgba(5, 19, 27, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  font: 700 0.59rem/1 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+
+.preview-status span {
+  width: 7px;
+  height: 7px;
+  background: var(--yellow);
+  border-radius: 50%;
+}
+
+[data-preview-state="ready"] .preview-status span {
+  background: var(--mint);
+}
+
+[data-preview-state="error"] .preview-status span,
+[data-preview-state="timeout"] .preview-status span {
+  background: var(--red);
+}
+
+[data-preview-state="loading"] .stage-copy,
+[data-preview-state="ready"] .stage-copy,
+[data-preview-state="loading"] .orbit,
+[data-preview-state="ready"] .orbit {
+  visibility: hidden;
+}
+
+[data-preview-state="ready"] .stage-grid {
+  opacity: 0;
+}
+
 .stage-grid {
   position: absolute;
   inset: 0;

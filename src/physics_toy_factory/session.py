@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -26,6 +27,16 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+@dataclass(frozen=True)
+class PreviewBinding:
+    """Private server-side identity for the one current iframe load."""
+
+    preview_id: str
+    run_id: str
+    revision: str
+    shell_served: bool = False
+
+
 class SessionService:
     """Own every read-modify-write operation on the product session."""
 
@@ -33,6 +44,7 @@ class SessionService:
         self._lock = asyncio.Lock()
         state = SessionState.RESET_REQUIRED if reset_required else SessionState.EMPTY
         self._record = SessionRecord(session_id=_new_session_id(), state=state)
+        self._preview: PreviewBinding | None = None
 
     async def snapshot(self) -> SessionRecord:
         """Return a detached state value safe for response serialization."""
@@ -103,6 +115,7 @@ class SessionService:
                 started_at=_now(),
             )
             self._record.runs.append(link)
+            self._preview = None
             self._record.active_run_id = run_id
             self._record.state = (
                 SessionState.RUNNING if kind is RunKind.CREATE else SessionState.MODIFYING
@@ -133,10 +146,100 @@ class SessionService:
                 link.verified_sketch_sha256 = sketch_sha256
                 self._record.current_sketch_sha256 = sketch_sha256
                 self._record.state = SessionState.READY
+                self._record.browser_error = None
             else:
                 link.outcome = RunOutcome.FAILED
                 self._record.current_sketch_sha256 = None
                 self._record.state = SessionState.FAILED
+            self._preview = None
+
+    async def bind_preview(self, *, preview_id: str, revision: str) -> PreviewBinding:
+        """Bind a fresh iframe identity to the latest verified run and revision."""
+
+        async with self._lock:
+            if (
+                self._record.state is not SessionState.READY
+                or self._record.current_sketch_sha256 != revision
+            ):
+                raise conflict("preview_not_ready", "Only the current verified sketch can be previewed.")
+            run = next(
+                (
+                    item
+                    for item in reversed(self._record.runs)
+                    if item.outcome is RunOutcome.READY
+                    and item.verified_sketch_sha256 == revision
+                ),
+                None,
+            )
+            if run is None:
+                raise conflict("preview_not_ready", "Only the current verified sketch can be previewed.")
+            self._preview = PreviewBinding(
+                preview_id=preview_id,
+                run_id=run.run_id,
+                revision=revision,
+            )
+            return self._preview
+
+    async def consume_preview_shell(
+        self, *, preview_id: str, revision: str
+    ) -> PreviewBinding:
+        """Allow exactly one shell response for a freshly issued preview identity."""
+
+        async with self._lock:
+            binding = self._preview
+            if (
+                binding is None
+                or binding.preview_id != preview_id
+                or binding.revision != revision
+                or binding.shell_served
+                or self._record.state is not SessionState.READY
+                or self._record.current_sketch_sha256 != revision
+            ):
+                raise conflict("preview_not_ready", "Only the current verified preview is available.")
+            opened = PreviewBinding(
+                preview_id=binding.preview_id,
+                run_id=binding.run_id,
+                revision=binding.revision,
+                shell_served=True,
+            )
+            self._preview = opened
+            return opened
+
+    async def require_preview(self, *, preview_id: str, revision: str) -> PreviewBinding:
+        """Reject stale, unopened, mismatched, or no-longer-ready asset requests."""
+
+        async with self._lock:
+            binding = self._preview
+            if (
+                binding is None
+                or binding.preview_id != preview_id
+                or binding.revision != revision
+                or not binding.shell_served
+                or self._record.state is not SessionState.READY
+                or self._record.current_sketch_sha256 != revision
+            ):
+                raise conflict("preview_not_ready", "Only the current verified preview is available.")
+            return binding
+
+    async def record_browser_error(
+        self, *, run_id: str, preview_id: str, error: dict[str, object]
+    ) -> SessionRecord:
+        """Fail the current preview only when its server-bound identity matches."""
+
+        async with self._lock:
+            binding = self._preview
+            if (
+                binding is None
+                or binding.preview_id != preview_id
+                or binding.run_id != run_id
+                or not binding.shell_served
+                or self._record.state is not SessionState.READY
+            ):
+                raise conflict("preview_mismatch", "The preview report is stale or does not match.")
+            self._record.browser_error = error
+            self._record.state = SessionState.FAILED
+            self._preview = None
+            return self._record.model_copy(deep=True)
 
     async def reset(self, resetter: Callable[[], Awaitable[None]]) -> SessionRecord:
         """Reset workspace and state under the same mutation lock."""
@@ -146,6 +249,7 @@ class SessionService:
                 raise conflict("run_active", "Reset is forbidden while a run is active.")
             await resetter()
             self._record = SessionRecord(session_id=_new_session_id())
+            self._preview = None
             return self._record.model_copy(deep=True)
 
     def _latest_ready_run_id(self) -> str | None:

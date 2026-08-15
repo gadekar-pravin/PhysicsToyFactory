@@ -2,17 +2,16 @@
 
 Physics Toy Factory is the product-side companion to S17Code. It owns the trusted p5.js fixture,
 server-side smoke checker, dedicated scratch-workspace lifecycle, product API, and browser UI. Phase 2
-adds the process-local session, authenticated S17 adapter, asynchronous Create and Follow-up
-orchestration, raw graph/code reads, and streaming event proxy. Phase 3 adds the responsive workshop
-UI, real journal-backed activity rendering, reconnect/deduplication behavior, and safe source/run
-dialogs. Generated code is not executed in the browser until Phase 4.
+adds the process-local session and S17 orchestration. Phase 3 adds the responsive workshop UI and real
+journal-backed activity. Phase 4 adds the exact-hash preview gate, nonce-protected trusted shell,
+sandboxed iframe, browser-error capture, and readiness watchdog.
 
 ## Prerequisites
 
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - Node.js 20 or newer available as `node`
-- Playwright Chromium for the Phase 3 browser gate
+- Playwright Chromium for the Phase 3 and Phase 4 browser gates
 
 Node is an external runtime prerequisite. There is intentionally no npm project, JavaScript package
 manager, frontend build, or runtime CDN dependency.
@@ -42,6 +41,11 @@ POST /api/runs/follow-up
 GET  /api/runs/{session-owned-run-id}
 GET  /api/runs/{session-owned-run-id}/events
 GET  /api/code
+POST /api/preview
+GET  /preview/{verified-sha256}?preview_id={server-issued-id}
+GET  /api/preview/p5.min.js?revision={verified-sha256}&preview_id={server-issued-id}
+GET  /api/preview/sketch.js?revision={verified-sha256}&preview_id={server-issued-id}
+POST /api/runs/{session-owned-run-id}/browser-error
 ```
 
 The browser never supplies a workspace path or upstream URL, and it never receives the S17 control
@@ -89,6 +93,21 @@ uv run pytest -q -m "not browser"
 If Node is absent, checker tests report an explicit skip for local diagnosis. Such a skip does not
 satisfy the Phase 1 gate or CI.
 
+## Phase 4 deterministic gate
+
+```bash
+uv run ruff check .
+uv run pytest -q tests/test_api.py tests/test_workspace.py
+uv run pytest -q -m "browser and preview" tests/test_browser.py
+```
+
+The preview browser journey proves that the iframe is created only for the current passing SHA,
+uses exactly `sandbox="allow-scripts"` and `referrerpolicy="no-referrer"`, and becomes interactive
+only after the trusted shell reports two animation frames. It also verifies that network, storage,
+parent-DOM, popup, and top-navigation attempts fail; wrong-window and wrong-preview-ID messages are
+ignored; a genuine runtime error is recorded without a repair run; and an unresponsive iframe is
+destroyed by the configured watchdog.
+
 ## Trusted fixture
 
 The packaged fixture contains the workspace marker, `P5_API.md`, `p5check.js`, and the entire iframe
@@ -125,6 +144,6 @@ sandboxed.
 
 ## Phase boundary
 
-Phase 3 does not implement the Phase 4 iframe preview, Phase 5 follow-up controls, automatic browser
-repair, Surprise Me, skill A/B, or planted-refusal demonstrations. Follow-up backend authority and
-linking are present so the later UI can use them, but generated code is not rendered in an iframe yet.
+Phase 4 does not implement Phase 5 follow-up controls, automatic browser repair, Surprise Me, skill
+A/B, or planted-refusal demonstrations. Follow-up backend authority and linking are present for the
+later UI, but a browser-only failure is displayed and recorded without starting another S17 run.

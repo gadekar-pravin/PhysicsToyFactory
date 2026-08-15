@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 
 import httpx
 import pytest
@@ -176,6 +177,160 @@ async def test_changed_sketch_after_pass_is_never_reported_verified(product) -> 
     code = (await product.client.get("/api/code")).json()
     assert code["verified"] is False
     assert code["verified_run_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_preview_is_blocked_until_exact_revision_is_verified(product) -> None:
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    before = await product.client.post("/api/preview", json={"revision": revision})
+    assert before.status_code == 409
+    assert before.json()["error"]["code"] == "preview_not_ready"
+
+    await _make_ready(product)
+    mismatch = await product.client.post("/api/preview", json={"revision": "0" * 64})
+    malformed = await product.client.post("/api/preview", json={"revision": "not-a-hash"})
+    assert mismatch.status_code == 409
+    assert mismatch.json()["error"]["code"] == "preview_not_ready"
+    assert malformed.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_preview_shell_and_scripts_are_nonce_bound_local_and_uncached(product) -> None:
+    run_id = await _make_ready(product)
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    lease_response = await product.client.post("/api/preview", json={"revision": revision})
+    lease = lease_response.json()
+    assert lease_response.status_code == 200
+    assert lease["run_id"] == run_id
+    assert lease["revision"] == revision
+    assert lease["ready_timeout_ms"] == 8000
+    assert re.fullmatch(r"[A-Za-z0-9_-]{32,128}", lease["preview_id"])
+
+    shell = await product.client.get(lease["url"])
+    assert shell.status_code == 200
+    assert shell.headers["cache-control"] == "no-store"
+    assert shell.headers["referrer-policy"] == "no-referrer"
+    assert shell.headers["x-content-type-options"] == "nosniff"
+    csp = shell.headers["content-security-policy"]
+    nonce_match = re.search(r"script-src 'nonce-([A-Za-z0-9_-]+)'", csp)
+    assert nonce_match is not None
+    assert f'nonce="{nonce_match.group(1)}"' in shell.text
+    assert "connect-src 'none'" in csp
+    assert "frame-ancestors 'self'" in csp
+    assert "navigate-to 'none'" in csp
+    assert "script-src 'unsafe-inline'" not in csp
+    assert "https://" not in shell.text
+    assert "http://" not in shell.text
+    assert "__PTF_" not in shell.text
+    assert lease["preview_id"] in shell.text
+
+    repeated_shell = await product.client.get(lease["url"])
+    assert repeated_shell.status_code == 409
+    assert repeated_shell.json()["error"]["code"] == "preview_not_ready"
+
+    params = {"revision": revision, "preview_id": lease["preview_id"]}
+    p5 = await product.client.get("/api/preview/p5.min.js", params=params)
+    sketch = await product.client.get("/api/preview/sketch.js", params=params)
+    assert p5.status_code == sketch.status_code == 200
+    assert len(p5.content) == 989034
+    assert sketch.content == SKETCH.encode()
+    for response in (p5, sketch):
+        assert response.headers["content-type"].startswith("application/javascript")
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_preview_assets_fail_closed_after_sketch_changes_or_id_is_stale(product) -> None:
+    await _make_ready(product)
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    first = (await product.client.post("/api/preview", json={"revision": revision})).json()
+    second = (await product.client.post("/api/preview", json={"revision": revision})).json()
+
+    stale = await product.client.get(first["url"])
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "preview_not_ready"
+
+    product.settings.workspace.joinpath("sketch.js").write_text(
+        SKETCH + "// changed after pass\n", encoding="utf-8"
+    )
+    changed_shell = await product.client.get(second["url"])
+    changed_script = await product.client.get(
+        "/api/preview/sketch.js",
+        params={"revision": revision, "preview_id": second["preview_id"]},
+    )
+    assert changed_shell.status_code == changed_script.status_code == 409
+    assert changed_shell.json()["error"]["code"] == "preview_not_ready"
+    assert changed_script.json()["error"]["code"] == "preview_not_ready"
+
+
+@pytest.mark.asyncio
+async def test_browser_error_requires_bound_run_and_preview_and_starts_no_repair(product) -> None:
+    run_id = await _make_ready(product)
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    lease = (await product.client.post("/api/preview", json={"revision": revision})).json()
+    assert (await product.client.get(lease["url"])).status_code == 200
+    error = {
+        "preview_id": lease["preview_id"],
+        "name": "TypeError",
+        "message": "draw failed safely",
+        "line": 42,
+        "column": 7,
+    }
+    start_count = len(product.fake.starts)
+
+    stranger = await product.client.post("/api/runs/run-stranger/browser-error", json=error)
+    wrong_id = await product.client.post(
+        f"/api/runs/{run_id}/browser-error",
+        json={**error, "preview_id": "x" * 43},
+    )
+    assert stranger.status_code == 404
+    assert wrong_id.status_code == 409
+
+    response = await product.client.post(f"/api/runs/{run_id}/browser-error", json=error)
+    assert response.status_code == 200
+    session = response.json()["session"]
+    assert session["state"] == "failed"
+    assert session["browser_error"] == error
+    assert len(product.fake.starts) == start_count
+
+    repeated = await product.client.post(f"/api/runs/{run_id}/browser-error", json=error)
+    assert repeated.status_code == 409
+    assert len(product.fake.starts) == start_count
+
+
+@pytest.mark.asyncio
+async def test_browser_error_payload_is_bounded_and_never_echoed(product) -> None:
+    run_id = await _make_ready(product)
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    lease = (await product.client.post("/api/preview", json={"revision": revision})).json()
+    assert (await product.client.get(lease["url"])).status_code == 200
+    attack = "<img id=error-attack>" * 100
+    response = await product.client.post(
+        f"/api/runs/{run_id}/browser-error",
+        json={
+            "preview_id": lease["preview_id"],
+            "name": "TypeError",
+            "message": attack,
+            "line": 1,
+            "column": 1,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert attack not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asset", ["shell/index.html", "shell/p5.min.js"])
+async def test_tampered_preview_shell_or_runtime_blocks_preview(product, asset: str) -> None:
+    await _make_ready(product)
+    revision = hashlib.sha256(SKETCH.encode()).hexdigest()
+    product.settings.workspace.joinpath(asset).write_text("tampered", encoding="utf-8")
+    response = await product.client.post("/api/preview", json={"revision": revision})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "workspace_invalid"
 
 
 @pytest.mark.asyncio

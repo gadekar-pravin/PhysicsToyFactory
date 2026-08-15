@@ -73,6 +73,26 @@ class PromptBody(BaseModel):
     prompt: str
 
 
+class PreviewLeaseBody(BaseModel):
+    """Request one browser cage for the exact verified revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class BrowserErrorBody(BaseModel):
+    """Bounded runtime failure reported by the trusted preview shell."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_id: str = Field(min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=500)
+    line: int = Field(ge=0, le=1_000_000)
+    column: int = Field(ge=0, le=1_000_000)
+
+
 class StartEnvelope(BaseModel):
     """The 202 response returned before S17 execution completes."""
 

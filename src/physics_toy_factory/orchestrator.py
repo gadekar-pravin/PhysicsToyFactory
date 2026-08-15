@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import posixpath
+import secrets
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -12,7 +14,14 @@ from typing import Any
 
 from physics_toy_factory.config import Settings
 from physics_toy_factory.errors import ProductError, conflict
-from physics_toy_factory.models import CodeResponse, RunKind, SessionState, StartEnvelope
+from physics_toy_factory.models import (
+    BrowserErrorBody,
+    CodeResponse,
+    RunKind,
+    SessionRecord,
+    SessionState,
+    StartEnvelope,
+)
 from physics_toy_factory.prompts import creation_goal, follow_up_goal
 from physics_toy_factory.s17_client import S17Client
 from physics_toy_factory.session import SessionService
@@ -20,6 +29,12 @@ from physics_toy_factory.workspace import WorkspaceManager, WorkspaceSafetyError
 
 CREATE_AUTHORITY = ["create_file", "edit_code", "run_command"]
 FOLLOW_UP_AUTHORITY = ["edit_code", "run_command"]
+SHELL_PLACEHOLDERS = (
+    "__PTF_NONCE__",
+    "__PTF_PREVIEW_ID_JSON__",
+    "__PTF_P5_URL__",
+    "__PTF_SKETCH_URL__",
+)
 
 
 @dataclass(frozen=True)
@@ -197,6 +212,65 @@ class Orchestrator:
             verified_run_id=verified_run_id if verified else None,
         )
 
+    async def prepare_preview(self, revision: str) -> dict[str, object]:
+        """Issue a random, server-bound identity for one verified iframe load."""
+
+        await self._require_verified_sketch(revision)
+        preview_id = secrets.token_urlsafe(32)
+        binding = await self._session.bind_preview(preview_id=preview_id, revision=revision)
+        return {
+            "preview_id": preview_id,
+            "run_id": binding.run_id,
+            "revision": revision,
+            "url": f"/preview/{revision}?preview_id={preview_id}",
+            "ready_timeout_ms": round(self._settings.preview_ready_timeout_seconds * 1000),
+        }
+
+    async def preview_shell(self, *, revision: str, preview_id: str) -> tuple[str, str]:
+        """Render the trusted shell with a fresh nonce after rechecking the preview gate."""
+
+        await self._session.consume_preview_shell(preview_id=preview_id, revision=revision)
+        await self._require_verified_sketch(revision)
+        template = self._read_trusted_text("shell/index.html")
+        if any(template.count(placeholder) == 0 for placeholder in SHELL_PLACEHOLDERS):
+            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
+        nonce = secrets.token_urlsafe(32)
+        query = f"revision={revision}&preview_id={preview_id}"
+        rendered = (
+            template.replace("__PTF_NONCE__", nonce)
+            .replace("__PTF_PREVIEW_ID_JSON__", _json_string(preview_id))
+            .replace("__PTF_P5_URL__", f"/api/preview/p5.min.js?{query}")
+            .replace("__PTF_SKETCH_URL__", f"/api/preview/sketch.js?{query}")
+        )
+        if any(placeholder in rendered for placeholder in SHELL_PLACEHOLDERS):
+            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
+        return rendered, nonce
+
+    async def preview_javascript(
+        self, *, revision: str, preview_id: str, asset: str
+    ) -> bytes:
+        """Serve only the fixed p5 runtime or exact verified sketch bytes."""
+
+        sketch = await self._require_preview_asset(revision=revision, preview_id=preview_id)
+        if asset == "sketch.js":
+            return sketch.content.encode("utf-8")
+        if asset == "p5.min.js":
+            return self._read_trusted_bytes("shell/p5.min.js")
+        raise ProductError(404, "preview_asset_not_found", "Preview asset does not exist.")
+
+    async def browser_error(
+        self, *, run_id: str, body: BrowserErrorBody
+    ) -> SessionRecord:
+        """Record one bounded error only for the currently bound iframe."""
+
+        await self._session.require_owned(run_id)
+        error = body.model_dump(mode="json")
+        return await self._session.record_browser_error(
+            run_id=run_id,
+            preview_id=body.preview_id,
+            error=error,
+        )
+
     async def reset(self):  # type: ignore[no-untyped-def]
         """Reset the dedicated workspace without touching S17 journals."""
 
@@ -254,9 +328,47 @@ class Orchestrator:
             raise ProductError(409, "sketch_invalid", "Generated sketch is not UTF-8.") from exc
         return _Sketch(content, len(payload), hashlib.sha256(payload).hexdigest())
 
+    async def _require_verified_sketch(self, revision: str) -> _Sketch:
+        self._validate_workspace()
+        snapshot = await self._session.snapshot()
+        if (
+            snapshot.state is not SessionState.READY
+            or snapshot.current_sketch_sha256 != revision
+        ):
+            raise conflict("preview_not_ready", "Only the current verified sketch can be previewed.")
+        sketch = self._read_sketch()
+        if sketch.sha256 != revision:
+            raise conflict("preview_not_ready", "The verified sketch changed; preview is blocked.")
+        return sketch
+
+    async def _require_preview_asset(self, *, revision: str, preview_id: str) -> _Sketch:
+        await self._session.require_preview(preview_id=preview_id, revision=revision)
+        return await self._require_verified_sketch(revision)
+
+    def _read_trusted_bytes(self, relative_path: str) -> bytes:
+        path = self._workspace.root / relative_path
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise OSError
+            return path.read_bytes()
+        except OSError as exc:
+            raise ProductError(409, "workspace_invalid", "Trusted preview asset is unavailable.") from exc
+
+    def _read_trusted_text(self, relative_path: str) -> str:
+        try:
+            return self._read_trusted_bytes(relative_path).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ProductError(409, "workspace_invalid", "Trusted preview asset is invalid.") from exc
+
 
 @dataclass(frozen=True)
 class _Sketch:
     content: str
     bytes: int
     sha256: str
+
+
+def _json_string(value: str) -> str:
+    """Encode a token for a JavaScript string literal without HTML-significant bytes."""
+
+    return json.dumps(value).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
