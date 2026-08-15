@@ -47,6 +47,20 @@ async def test_health_distinguishes_process_gateway_workspace_and_container(prod
 
 
 @pytest.mark.asyncio
+async def test_main_ui_and_static_assets_are_served_without_preview_execution(product) -> None:
+    page = await product.client.get("/")
+    script = await product.client.get("/static/app.js")
+    styles = await product.client.get("/static/styles.css")
+    assert page.status_code == script.status_code == styles.status_code == 200
+    assert "Physics Toy Factory" in page.text
+    assert "Factory activity" in page.text
+    assert "<iframe" not in page.text
+    assert "EventSource" in script.text
+    assert "innerHTML" not in script.text
+    assert CONTROL_TOKEN not in page.text + script.text + styles.text
+
+
+@pytest.mark.asyncio
 async def test_health_is_degraded_when_s17_is_up_but_gateway_is_not_ready(product) -> None:
     product.fake.ready_status = 503
     body = (await product.client.get("/api/health")).json()

@@ -3,14 +3,16 @@
 Physics Toy Factory is the product-side companion to S17Code. It owns the trusted p5.js fixture,
 server-side smoke checker, dedicated scratch-workspace lifecycle, product API, and browser UI. Phase 2
 adds the process-local session, authenticated S17 adapter, asynchronous Create and Follow-up
-orchestration, raw graph/code reads, and streaming event proxy. The full browser UI arrives in later
-phases.
+orchestration, raw graph/code reads, and streaming event proxy. Phase 3 adds the responsive workshop
+UI, real journal-backed activity rendering, reconnect/deduplication behavior, and safe source/run
+dialogs. Generated code is not executed in the browser until Phase 4.
 
 ## Prerequisites
 
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - Node.js 20 or newer available as `node`
+- Playwright Chromium for the Phase 3 browser gate
 
 Node is an external runtime prerequisite. There is intentionally no npm project, JavaScript package
 manager, frontend build, or runtime CDN dependency.
@@ -20,6 +22,7 @@ manager, frontend build, or runtime CDN dependency.
 ```bash
 cp .env.example .env
 uv sync --locked --dev
+uv run playwright install chromium
 uv run physics-toy-factory
 ```
 
@@ -28,7 +31,7 @@ The server binds to `127.0.0.1:8120` by default. On first startup the app copies
 fixture as `physics-toy-base-v1`. Start the S17 service with the product profile below before creating
 a run.
 
-The Phase 2 browser-facing API is:
+The browser-facing API is:
 
 ```text
 GET  /api/health
@@ -64,6 +67,19 @@ uv run pytest -q tests/test_s17_client.py tests/test_orchestrator.py tests/test_
 These tests use an in-process fake S17 ASGI service and recorded graph/SSE fixtures. They require no
 network or model call.
 
+## Phase 3 deterministic gate
+
+```bash
+uv run ruff check .
+uv run pytest -q tests/test_api.py
+uv run pytest -q -m "browser and activity" tests/test_browser.py
+```
+
+The browser tests start the real product HTTP surface with an in-process fake S17 service and drive
+one installed Chromium project. The recorded journey proves planning, write, checker failure, repair,
+checker success, provenance, safe dialogs, and reconnect snapshot deduplication. Browser installation
+is explicit and is never performed by the test suite.
+
 The complete non-browser suite is:
 
 ```bash
@@ -85,8 +101,8 @@ It refuses source-repository roots, home, filesystem root, symlinks, and tampere
 
 ## S17 launch profile
 
-The interactive product path is added in Phase 2. Its S17Code process must use the exact same real
-workspace path and this product-specific profile:
+The interactive product path uses an S17Code process with the exact same real workspace path and this
+product-specific profile:
 
 ```text
 S17_CONTROL_TOKEN=<same private value as PTF_S17_CONTROL_TOKEN>
@@ -109,6 +125,6 @@ sandboxed.
 
 ## Phase boundary
 
-Phase 2 does not implement the Phase 3 activity UI, Phase 4 iframe preview, automatic browser repair,
-Surprise Me, skill A/B, or planted-refusal demonstrations. Follow-up backend authority and linking are
-present so the later UI can use them, but generated code is not rendered in an iframe yet.
+Phase 3 does not implement the Phase 4 iframe preview, Phase 5 follow-up controls, automatic browser
+repair, Surprise Me, skill A/B, or planted-refusal demonstrations. Follow-up backend authority and
+linking are present so the later UI can use them, but generated code is not rendered in an iframe yet.

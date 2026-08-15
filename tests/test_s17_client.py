@@ -162,7 +162,9 @@ async def test_recorded_sse_stream_contract(settings) -> None:
         stream = await S17Client(settings, transport).open_events("run-recorded", after=0, reconnect=False)
         frames = [frame async for frame in stream.frames()]
         await stream.close()
-    assert len(frames) == 3
+    assert len(frames) == len(records)
+    assert b"RUN_STARTED" in frames[0]
+    assert any(b"STEP_STARTED" in frame for frame in frames)
     assert b"RUN_FINISHED" in frames[-1]
 
 

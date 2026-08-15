@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -61,20 +61,69 @@ def terminal_graph(
 
 
 def sse_for_graph(graph: dict[str, Any], *, include_terminal: bool | None = None) -> bytes:
-    frames = [
-        "id: 1\ndata: "
-        + json.dumps({"type": "RUN_STARTED", "seq": 1, "source_kind": "run_started"})
-        + "\n\n",
-        ": keepalive\n\n",
-    ]
+    frames = []
+    for event in graph["events"]:
+        payload = _agui_event(event)
+        frames.append(
+            f"id: {event['sequence']}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+        )
+    frames.append(": keepalive\n\n")
     terminal = graph["finished"] if include_terminal is None else include_terminal
     if terminal:
+        last_sequence = graph["events"][-1]["sequence"] if graph["events"] else 0
         frames.append(
             "data: "
-            + json.dumps({"type": "RUN_FINISHED", "seq": 2, "source_kind": "derived"})
+            + json.dumps(
+                {"type": "RUN_FINISHED", "seq": last_sequence + 1, "source_kind": "derived"},
+                separators=(",", ":"),
+            )
             + "\n\n"
         )
     return "".join(frames).encode()
+
+
+def _agui_event(event: dict[str, Any]) -> dict[str, Any]:
+    kind = event["kind"]
+    sequence = event["sequence"]
+    node_id = event.get("node_id")
+    payload = event.get("payload") or {}
+    base: dict[str, Any] = {"seq": sequence, "source_kind": kind}
+    if kind == "run_started":
+        return {**base, "type": "RUN_STARTED"}
+    if kind == "graph_patched":
+        return {
+            **base,
+            "type": "STATE_DELTA",
+            "delta": {
+                "op": "graph_patched",
+                "reason": payload.get("reason", ""),
+                "trigger": payload.get("trigger_event"),
+            },
+        }
+    if kind == "task_started":
+        return {**base, "type": "STEP_STARTED", "stepName": node_id}
+    if kind == "task_succeeded":
+        return {
+            **base,
+            "type": "STEP_FINISHED",
+            "stepName": node_id,
+            "delta": {"op": "add", "path": f"/results/{node_id}", "value": payload},
+        }
+    if kind == "task_failed":
+        return {
+            **base,
+            "type": "STEP_FINISHED",
+            "stepName": node_id,
+            "error": payload.get("error", "task failed"),
+        }
+    if kind == "run_failed":
+        return {
+            **base,
+            "type": "RUN_ERROR",
+            "error": payload.get("error", "run failed"),
+            "errorType": payload.get("error_type", "RuntimeError"),
+        }
+    return {**base, "type": "CUSTOM"}
 
 
 @dataclass
@@ -84,6 +133,7 @@ class FakeS17:
     token: str
     runs: dict[str, dict[str, Any]] = field(default_factory=dict)
     streams: dict[str, bytes] = field(default_factory=dict)
+    reconnect_streams: dict[str, bytes] = field(default_factory=dict)
     starts: list[dict[str, Any]] = field(default_factory=list)
     event_queries: list[dict[str, str]] = field(default_factory=list)
     start_status: int = 202
@@ -91,6 +141,7 @@ class FakeS17:
     process_status: int = 200
     ready_status: int = 200
     raw_status: int | None = None
+    on_start: Callable[[str], None] | None = None
 
     def __post_init__(self) -> None:
         self.app = FastAPI()
@@ -124,6 +175,8 @@ class FakeS17:
             run_id = f"run-fake-{len(self.starts)}"
             self.runs[run_id] = unfinished_graph(run_id)
             self.streams[run_id] = sse_for_graph(self.runs[run_id])
+            if self.on_start is not None:
+                self.on_start(run_id)
             return JSONResponse(
                 status_code=202, content={"run_id": run_id, "status": "accepted"}
             )
@@ -146,7 +199,10 @@ class FakeS17:
                 raise HTTPException(404, "missing")
 
             async def body():  # type: ignore[no-untyped-def]
-                yield self.streams.get(run_id, sse_for_graph(self.runs[run_id]))
+                if request.query_params.get("reconnect") == "1" and run_id in self.reconnect_streams:
+                    yield self.reconnect_streams[run_id]
+                else:
+                    yield self.streams.get(run_id, sse_for_graph(self.runs[run_id]))
 
             return StreamingResponse(body(), media_type="text/event-stream")
 

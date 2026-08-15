@@ -1,3 +1,12 @@
 {"id":1,"data":{"type":"RUN_STARTED","seq":1,"source_kind":"run_started"}}
-{"keepalive":true}
-{"data":{"type":"RUN_FINISHED","seq":5,"source_kind":"derived"}}
+{"id":2,"data":{"type":"STATE_DELTA","seq":2,"source_kind":"graph_patched","delta":{"op":"graph_patched","reason":"initial plan","trigger":1}}}
+{"id":3,"data":{"type":"STEP_STARTED","seq":3,"source_kind":"task_started","stepName":"write"}}
+{"id":4,"data":{"type":"STEP_FINISHED","seq":4,"source_kind":"task_succeeded","stepName":"write","delta":{"op":"add","path":"/results/write","value":{}}}}
+{"id":5,"data":{"type":"STEP_STARTED","seq":5,"source_kind":"task_started","stepName":"check_red"}}
+{"id":6,"data":{"type":"STEP_FINISHED","seq":6,"source_kind":"task_succeeded","stepName":"check_red","delta":{"op":"add","path":"/results/check_red","value":{}}}}
+{"id":7,"data":{"type":"STATE_DELTA","seq":7,"source_kind":"graph_patched","delta":{"op":"graph_patched","reason":"checker repair","trigger":6}}}
+{"id":8,"data":{"type":"STEP_STARTED","seq":8,"source_kind":"task_started","stepName":"repair"}}
+{"id":9,"data":{"type":"STEP_FINISHED","seq":9,"source_kind":"task_succeeded","stepName":"repair","delta":{"op":"add","path":"/results/repair","value":{}}}}
+{"id":10,"data":{"type":"STEP_STARTED","seq":10,"source_kind":"task_started","stepName":"check_green"}}
+{"id":11,"data":{"type":"STEP_FINISHED","seq":11,"source_kind":"task_succeeded","stepName":"check_green","delta":{"op":"add","path":"/results/check_green","value":{}}}}
+{"data":{"type":"RUN_FINISHED","seq":13,"source_kind":"derived"}}

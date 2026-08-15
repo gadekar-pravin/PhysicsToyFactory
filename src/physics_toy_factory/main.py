@@ -6,13 +6,15 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from physics_toy_factory import __version__
 from physics_toy_factory.config import Settings, load_settings
@@ -30,6 +32,7 @@ SUGGESTED_PROMPTS = [
     "Fish that follow my cursor",
 ]
 log = logging.getLogger(__name__)
+STATIC_DIR = Path(__file__).with_name("static")
 
 
 def create_app(
@@ -68,6 +71,11 @@ def create_app(
                 await transport.aclose()
 
     app = FastAPI(title="Physics Toy Factory", version=__version__, lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
 
     @app.exception_handler(ProductError)
     async def product_error(_request: Request, exc: ProductError) -> JSONResponse:

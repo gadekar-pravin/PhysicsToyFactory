@@ -4,13 +4,179 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Physics Toy Factory</title>
+    <meta
+      name="description"
+      content="Describe a physics idea and watch a governed agent build and check the sketch."
+    >
     <link rel="stylesheet" href="/static/styles.css">
   </head>
   <body>
-    <main>
-      <h1>Physics Toy Factory</h1>
-      <p>Phase 1 checker and trusted workspace are ready.</p>
-    </main>
+    <div class="page-shell" id="app" data-state="connecting">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="Physics Toy Factory home">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>
+            <strong>Physics Toy</strong>
+            <small>Factory / Lab 17</small>
+          </span>
+        </a>
+        <nav class="header-actions" aria-label="Workspace actions">
+          <button class="button button-quiet" id="view-code" type="button" disabled>
+            View code
+          </button>
+          <button class="button button-quiet" id="view-run" type="button" disabled>
+            View run
+          </button>
+          <button class="button button-icon" id="reset-session" type="button" aria-label="Reset factory">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M4.9 7.8A8 8 0 1 1 4 13M4 5v5h5"/>
+            </svg>
+          </button>
+        </nav>
+      </header>
+
+      <div class="system-banner" id="system-banner" role="status" hidden>
+        <span class="banner-dot" aria-hidden="true"></span>
+        <span id="system-banner-text"></span>
+      </div>
+
+      <main class="studio">
+        <section class="intro" aria-labelledby="page-title">
+          <div>
+            <p class="eyebrow">Interactive mechanics workshop</p>
+            <h1 id="page-title">Turn an idea into<br><em>something that moves.</em></h1>
+          </div>
+          <div class="intro-note">
+            <span>01</span>
+            <p>Describe a small physical world. The factory writes it, checks it, and shows every real step.</p>
+          </div>
+        </section>
+
+        <div class="workbench">
+          <section class="simulation-panel panel" aria-labelledby="simulation-title">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">Output bay</p>
+                <h2 id="simulation-title">Simulation</h2>
+              </div>
+              <div class="state-badge" id="state-badge">
+                <span aria-hidden="true"></span>
+                <strong id="state-label">Connecting</strong>
+              </div>
+            </div>
+
+            <div class="simulation-stage" id="simulation-stage">
+              <div class="stage-grid" aria-hidden="true"></div>
+              <div class="orbit orbit-one" aria-hidden="true"><i></i></div>
+              <div class="orbit orbit-two" aria-hidden="true"><i></i></div>
+              <div class="stage-copy">
+                <div class="stage-icon" aria-hidden="true">
+                  <svg viewBox="0 0 72 72">
+                    <path d="M23 14h26M30 14v13L17 49a6 6 0 0 0 5 9h28a6 6 0 0 0 5-9L42 27V14"/>
+                    <path d="M23 46h26M29 39h2m9 6h2m-7-11h2"/>
+                  </svg>
+                </div>
+                <p class="stage-overline" id="stage-overline">Factory standing by</p>
+                <h3 id="stage-title">Your physics toy will take shape here.</h3>
+                <p id="stage-description">Start with a prompt below. Preview execution stays locked until the verified-preview phase.</p>
+              </div>
+              <div class="stage-lock" id="stage-lock">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <rect x="5" y="10" width="14" height="10" rx="2"/>
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+                </svg>
+                <span>Preview cage locked</span>
+              </div>
+            </div>
+          </section>
+
+          <aside class="activity-panel panel" aria-labelledby="activity-title">
+            <div class="panel-heading activity-heading">
+              <div>
+                <p class="panel-kicker">Live journal</p>
+                <h2 id="activity-title">Factory activity</h2>
+              </div>
+              <span class="live-indicator" id="live-indicator"><i></i> Live</span>
+            </div>
+            <div class="transport-state" id="transport-state" aria-live="polite"></div>
+            <ol class="activity-list" id="activity-list" aria-live="polite" aria-relevant="additions">
+              <li class="activity-empty" id="activity-empty">
+                <span aria-hidden="true">↳</span>
+                Real run evidence will appear here. No simulated progress messages.
+              </li>
+            </ol>
+            <div class="activity-footer">
+              <span id="evidence-count">0 evidence rows</span>
+              <span>Journal-backed</span>
+            </div>
+          </aside>
+        </div>
+
+        <section class="prompt-panel" aria-labelledby="prompt-title">
+          <div class="prompt-heading">
+            <div>
+              <p class="panel-kicker">Build instruction</p>
+              <h2 id="prompt-title">What should we make?</h2>
+            </div>
+            <p><span id="prompt-count">0</span> / 4000</p>
+          </div>
+          <form id="create-form">
+            <label class="sr-only" for="prompt">Describe a physics toy</label>
+            <div class="prompt-box">
+              <textarea
+                id="prompt"
+                name="prompt"
+                maxlength="4000"
+                rows="3"
+                placeholder="A constellation of tiny planets that orbit my cursor..."
+                required
+              ></textarea>
+              <button class="button button-primary" id="create-button" type="submit">
+                <span>Build this toy</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 12h13m-5-5 5 5-5 5"/></svg>
+              </button>
+            </div>
+          </form>
+          <div class="suggestions" aria-label="Suggested prompts">
+            <span>Try one</span>
+            <div id="suggestion-list"></div>
+          </div>
+          <p class="form-error" id="form-error" role="alert" hidden></p>
+        </section>
+      </main>
+
+      <footer>
+        <span>PTF / governed by S17</span>
+        <span>One active session · local workspace</span>
+      </footer>
+    </div>
+
+    <dialog class="data-dialog" id="code-dialog" aria-labelledby="code-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="panel-kicker">Generated artifact</p>
+          <h2 id="code-dialog-title">sketch.js</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close code dialog">×</button>
+      </div>
+      <div class="code-meta" id="code-meta"></div>
+      <pre><code id="code-content"></code></pre>
+    </dialog>
+
+    <dialog class="data-dialog run-dialog" id="run-dialog" aria-labelledby="run-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="panel-kicker">Unfiltered evidence</p>
+          <h2 id="run-dialog-title">Raw run graph</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close run dialog">×</button>
+      </div>
+      <div class="code-meta" id="run-meta"></div>
+      <pre><code id="run-content"></code></pre>
+    </dialog>
+
     <script src="/static/app.js" defer></script>
   </body>
 </html>

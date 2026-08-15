@@ -2,6 +2,12 @@
   "run_id": "run-recorded-red-green",
   "finished": true,
   "nodes": {
+    "write": {
+      "skill": "create_file",
+      "state": "succeeded",
+      "input": {"path": "sketch.js"},
+      "result": {"summary": "created sketch.js"}
+    },
     "check_red": {
       "skill": "run_command",
       "state": "succeeded",
@@ -30,9 +36,16 @@
   "edges": [],
   "events": [
     {"sequence": 1, "kind": "run_started", "node_id": null, "payload": {}},
-    {"sequence": 2, "kind": "task_succeeded", "node_id": "check_red", "payload": {}},
-    {"sequence": 3, "kind": "task_succeeded", "node_id": "repair", "payload": {}},
-    {"sequence": 4, "kind": "task_succeeded", "node_id": "check_green", "payload": {}},
-    {"sequence": 5, "kind": "task_succeeded", "node_id": "answer", "payload": {}}
+    {"sequence": 2, "kind": "graph_patched", "node_id": null, "payload": {"reason": "initial plan", "trigger_event": 1}},
+    {"sequence": 3, "kind": "task_started", "node_id": "write", "payload": {}},
+    {"sequence": 4, "kind": "task_succeeded", "node_id": "write", "payload": {}},
+    {"sequence": 5, "kind": "task_started", "node_id": "check_red", "payload": {}},
+    {"sequence": 6, "kind": "task_succeeded", "node_id": "check_red", "payload": {}},
+    {"sequence": 7, "kind": "graph_patched", "node_id": null, "payload": {"reason": "checker repair", "trigger_event": 6}},
+    {"sequence": 8, "kind": "task_started", "node_id": "repair", "payload": {}},
+    {"sequence": 9, "kind": "task_succeeded", "node_id": "repair", "payload": {}},
+    {"sequence": 10, "kind": "task_started", "node_id": "check_green", "payload": {}},
+    {"sequence": 11, "kind": "task_succeeded", "node_id": "check_green", "payload": {}},
+    {"sequence": 12, "kind": "task_succeeded", "node_id": "answer", "payload": {}}
   ]
 }
