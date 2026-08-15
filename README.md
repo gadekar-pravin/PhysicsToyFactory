@@ -9,12 +9,17 @@ sandboxed iframe, browser-error capture, and readiness watchdog.
 Phase 5 adds the single linked follow-up control, narrower edit-only authority, fresh recorded
 read/edit/check activity, and verified preview revision replacement.
 
+Phase 6 adds the reproducible live qualification runbook, exact two-step demo and suggested-prompt
+qualification tooling, a fail-closed genuine red-to-green repair proof, reviewed evidence
+publication, and browser screenshot capture.
+
 ## Prerequisites
 
 - Python 3.12 or newer
 - [`uv`](https://docs.astral.sh/uv/)
 - Node.js 20 or newer available as `node`
-- Playwright Chromium for the Phase 3 through Phase 5 browser gates
+- Playwright Chromium for the Phase 3 through Phase 6 browser gates
+- Docker for live generated-code qualification in the pinned non-root Node image
 
 Node is an external runtime prerequisite. There is intentionally no npm project, JavaScript package
 manager, frontend build, or runtime CDN dependency.
@@ -125,6 +130,35 @@ and `run_command`. The fake raw graph records `read_code` before one anchored `e
 then a passing checker. The original interaction remains in the resulting source and preview, a new
 verified revision replaces the old iframe, and a second follow-up is rejected without starting S17.
 
+## Phase 6 final gate
+
+```bash
+# In S17Code
+uv sync --locked --dev
+uv run ruff check .
+uv run pytest -q
+uv run python proofs/p2_budget_holds.py --offline --task "summarise the attached notes" --budget 0.01
+uv run python proofs/p3_denial_of_wallet.py --offline --task "keep refining the draft" --budget 0.01
+uv run python proofs/p4_trace_export.py --offline --task "compare two options" --budget 0.01
+
+# In PhysicsToyFactory
+uv sync --locked --dev
+uv run ruff check .
+uv run pytest -q -m "not browser"
+uv run pytest -q -m browser
+```
+
+Live qualification is deliberately separate from deterministic CI. Follow
+[`docs/PHASE6_RUNBOOK.md`](docs/PHASE6_RUNBOOK.md) to launch the exact shared workspace and
+container profile, exercise all four suggested prompts and the two-step solar-system demo, retain a
+real red-to-green repair journal, and capture the final verified preview. The tooling fails if a run
+does not converge; it never turns a first-attempt pass or fabricated event into repair evidence.
+
+The retained 2026-08-15 evidence records a passed genuine repair proof but a failed product
+qualification: all five create graphs finished without `answer_with_evidence`, the linked follow-up
+was therefore rejected with HTTP 409, and no verified preview screenshot was captured. Deterministic
+tests are green, but the live Phase 6 release gate and the MVP qualification remain incomplete.
+
 ## Trusted fixture
 
 The packaged fixture contains the workspace marker, `P5_API.md`, `p5check.js`, and the entire iframe
@@ -159,8 +193,9 @@ sandbox.
 available, the system is development-only for trusted prompts and must not be described as securely
 sandboxed.
 
-## Phase boundary
+## MVP boundary
 
-Phase 5 does not implement Phase 6 live qualification, retained grading evidence, automatic browser
-repair, Surprise Me, skill A/B, or planted-refusal demonstrations. A browser-only failure remains
-display-only and never starts another S17 run.
+Phase 6 supplies the final qualification gate for the specified MVP; the MVP is complete only when
+that live gate passes. It does not add automatic browser repair, Surprise Me, skill A/B,
+planted-refusal demonstrations, persistent multi-user sessions, or extra follow-ups. A browser-only
+failure remains display-only and never starts another S17 run.

@@ -1,0 +1,101 @@
+{
+  "browser_observation": {
+    "outcome": "not_run",
+    "reason": "no verified linked preview existed"
+  },
+  "evidence_kind": "live_product_qualification",
+  "outcome": "failed",
+  "recorded_at": "2026-08-15T17:37:13Z",
+  "scenario_count": 6,
+  "scenarios": [
+    {
+      "event_tape_name": "suggestion-1-rain-that-avoids-my-mouse.events.jsonl",
+      "event_tape_sha256": "99ec9edfcf399fb208f527cbcb111ba17d8baeefb06769ca233aeba938118cc2",
+      "kind": "create",
+      "model_routes": [],
+      "name": "suggestion-1-rain-that-avoids-my-mouse",
+      "outcome": "failed",
+      "prompt": "Rain that avoids my mouse",
+      "raw_graph_name": "suggestion-1-rain-that-avoids-my-mouse.graph.json",
+      "raw_graph_sha256": "d8d2dfb225cc313ea00a1a01ffe6d435d9de89b2c377972fefe091fe952514eb",
+      "reason": "answer_missing",
+      "run_id": "run-95d6905c1c06",
+      "sketch_sha256": null
+    },
+    {
+      "event_tape_name": "suggestion-2-bouncy-magnets.events.jsonl",
+      "event_tape_sha256": "79ab1a162cd58f4670b1a3396553c4e5ef4265731d7ea15f2e5146465d465d53",
+      "kind": "create",
+      "model_routes": [],
+      "name": "suggestion-2-bouncy-magnets",
+      "outcome": "failed",
+      "prompt": "Bouncy magnets",
+      "raw_graph_name": "suggestion-2-bouncy-magnets.graph.json",
+      "raw_graph_sha256": "3d235af01091f893ef90fd5161e2814e285e16102802c0a0cb5fb204b9970fcf",
+      "reason": "answer_missing",
+      "run_id": "run-97eb34a7c9a6",
+      "sketch_sha256": null
+    },
+    {
+      "event_tape_name": "suggestion-3-angry-solar-system.events.jsonl",
+      "event_tape_sha256": "4da01444f9076c8162068654cbb582177a5aab68a2e8358ac209d3146e0ac200",
+      "kind": "create",
+      "model_routes": [],
+      "name": "suggestion-3-angry-solar-system",
+      "outcome": "failed",
+      "prompt": "Angry solar system",
+      "raw_graph_name": "suggestion-3-angry-solar-system.graph.json",
+      "raw_graph_sha256": "7e8f1f6ce108c2280f7209d7a434f80eee70ec6bbe54ea9d4b31b982e8f66bbb",
+      "reason": "answer_missing",
+      "run_id": "run-d9affcba0b99",
+      "sketch_sha256": null
+    },
+    {
+      "event_tape_name": "suggestion-4-fish-that-follow-my-cursor.events.jsonl",
+      "event_tape_sha256": "95ef9946a1a0e2ff1fbc95014cebdeba37ff335d4464ab026441d01ee4753b82",
+      "kind": "create",
+      "model_routes": [],
+      "name": "suggestion-4-fish-that-follow-my-cursor",
+      "outcome": "failed",
+      "prompt": "Fish that follow my cursor",
+      "raw_graph_name": "suggestion-4-fish-that-follow-my-cursor.graph.json",
+      "raw_graph_sha256": "ac143f060d4085d592e1f0c66883138907dc331fb3697a631a298f5c1a12336c",
+      "reason": "answer_missing",
+      "run_id": "run-91b5c1490066",
+      "sketch_sha256": null
+    },
+    {
+      "event_tape_name": "demo-create-tiny-solar-system.events.jsonl",
+      "event_tape_sha256": "f53e23323e24c28dbf5c7e96b2610aa29849b59aa95d66269547daa723271403",
+      "kind": "create",
+      "model_routes": [],
+      "name": "demo-create-tiny-solar-system",
+      "outcome": "failed",
+      "prompt": "Create a tiny solar system.",
+      "raw_graph_name": "demo-create-tiny-solar-system.graph.json",
+      "raw_graph_sha256": "dd5e90253aa63bbd5c30a4b17ea72e0274a98fb20bac49c7c0b7ac4e71209be4",
+      "reason": "answer_missing",
+      "run_id": "run-94e05d882fca",
+      "sketch_sha256": null
+    },
+    {
+      "event_tape_name": null,
+      "event_tape_sha256": null,
+      "kind": "follow_up",
+      "model_routes": [],
+      "name": "demo-follow-up-glowing-trails",
+      "outcome": "not_started",
+      "prompt": "Make the planets leave glowing trails.",
+      "raw_graph_name": null,
+      "raw_graph_sha256": null,
+      "reason": "solar_create_not_ready; product returned HTTP 409 and started no S17 run",
+      "run_id": null,
+      "sketch_sha256": null
+    }
+  ],
+  "schema_version": 1,
+  "unresolved_limitations": [
+    "All five live create graphs finished without answer_with_evidence.",
+    "The linked follow-up was correctly refused because solar creation was not ready."
+  ]
+}

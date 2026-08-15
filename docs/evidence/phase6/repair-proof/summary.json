@@ -1,0 +1,42 @@
+{
+  "artifacts": {
+    "event_tape": {
+      "name": "event-tape.jsonl",
+      "sha256": "10f758c961208ad0f2346d5e467a3a347948142e3b1b791b91e14b83f9da09fa"
+    },
+    "raw_graph": {
+      "name": "raw-graph.json",
+      "sha256": "f65dc6934840c4afe31c83bb013d833879111c89f2b3aaa482de090a354cd184"
+    }
+  },
+  "environment": {
+    "container_image": "physics-toy-factory-node:22.20.0-phase6",
+    "container_mode_configured": true,
+    "s17_base_url": "http://127.0.0.1:8113"
+  },
+  "evidence_kind": "repair_proof",
+  "model_routes": [
+    {
+      "model": "gemini-3.5-flash-lite",
+      "provider": "gemini_2"
+    },
+    {
+      "model": "google/gemini-3.7-flash",
+      "provider": "openrouter"
+    }
+  ],
+  "outcome": "passed",
+  "recorded_at": "2026-08-15T17:17:44Z",
+  "repair_chain": {
+    "edit_node_id": "edit_sketch",
+    "edit_sequence": 10,
+    "green_checker_node_id": "check_after_edit",
+    "green_sequence": 13,
+    "red_checker_node_id": "check_before_edit",
+    "red_exit_code": 1,
+    "red_sequence": 5
+  },
+  "run_id": "run-2d376894a75f",
+  "schema_version": 1,
+  "sketch_sha256": "e3beb62d2f0e4b4f3938b4515e2cdacf27217f4c65934c0781fb13193826d441"
+}
