@@ -5,31 +5,132 @@ into a running p5.js toy you can play with in the browser. You describe the toy;
 writes `sketch.js` inside a dedicated, hash-validated scratch workspace; a server-side Node checker
 must pass on the result; and only then does the browser receive an interactive preview.
 
-The product owns the trusted p5.js fixture, the smoke checker, the workspace lifecycle, the API, and
-the UI. It never runs the model itself: all agent work happens in the sibling S17Code engine, which
-this product drives over a private control API with a narrow, per-run authority list.
+> **Session 17, Assignment Part 1.** This is the `Lovable / v0 / bolt.new` option — type a thing,
+> watch it get built, see it running in the preview pane — applied to physics toys instead of web
+> apps. The engine is [S17Code](https://github.com/theschoolofai/S17Code); the product, the
+> frontend, the checker, and every refusal in it are this repository.
+
+The product never runs a model itself. All agent work happens in S17Code, which this product drives
+over a private control API with a narrow, per-run authority list.
 
 ## What it looks like
 
-![A verified Physics Toy Factory preview: the workshop UI with a running solar-system sketch in the sandboxed preview frame](docs/evidence/phase6/full-requalification-2026-08-16/final-linked-preview.png)
+![The saved-run archive with a verified run open: run metadata, a verified badge, and the generated angry solar system toy running inside the sandboxed preview frame](docs/images/workshop-verified-preview.png)
 
-That is a real captured frame from the 2026-08-16 live qualification — a solar system created from a
-prompt, then modified by a linked follow-up to leave glowing trails — not a mockup. It is retained
-with its run graphs under `docs/evidence/phase6/full-requalification-2026-08-16/`.
+A real saved run, reopened from the local archive. The prompt was "Angry solar system"; the agent
+decided on its own that the planets should have faces and that clicking should trigger a solar
+flare. Nothing on that canvas was written by a human.
+
+## Watch the run
+
+The lesson is blunt that legibility is the point: *"The run has to be visible… it is worth more than
+your CSS."* So the product shows every step the agent actually took, read back from the real S17
+graph. There are no simulated progress messages anywhere in the UI.
+
+![The run evidence viewer listing eight execution steps: read file, write file, verify sketch VALIDATION FAILED, write file, verify sketch VALIDATION FAILED, write file, verify sketch VALIDATION PASSED, final answer](docs/images/run-evidence-red-green.png)
+
+That is one real run for "Bouncy magnets", and it is the shape worth looking at:
+
+```text
+01  read_p5_api      read the allowed p5 surface
+02  write_sketch     first attempt
+03  run_p5check      VALIDATION FAILED     ← the agent failed itself
+04  write_sketch_v2  repair
+05  run_p5check_v2   VALIDATION FAILED     ← and again
+06  write_sketch_v3  repair
+07  run_p5check_v3   VALIDATION PASSED
+08  final_answer
+```
+
+Nobody told it to run the checker. It was told a checker existed. **Two red results, then green** —
+and only that green result can reach the preview cage. Expand any step to read the bounded evidence
+the agent read.
+
+## Quickstart
+
+Three processes: the gateway holds the keys, S17Code runs the loop, and this product is the
+frontend. S17 holds no credential, and the browser never receives one either.
+
+```bash
+git clone https://github.com/theschoolofai/glc_v5.git
+git clone https://github.com/theschoolofai/S17Code.git
+git clone https://github.com/gadekar-pravin/PhysicsToyFactory.git
+```
+
+**1. Gateway — port 8111**
+
+```bash
+cd glc_v5 && uv sync && uv run glc serve
+```
+
+**2. Build the checker image** (from this repository; digest-pinned and non-root)
+
+```bash
+docker build -f containers/phase6-node.Dockerfile -t physics-toy-factory-node:22.20.0-phase6 .
+docker run --rm physics-toy-factory-node:22.20.0-phase6 id -u   # expect 1000, not 0
+```
+
+**3. Engine — port 8113.** Start S17Code with this product-specific profile. The profile *is* the
+security boundary, so do not relax it:
+
+```text
+S17_CONTROL_TOKEN=<a long random token, the same value as PTF_S17_CONTROL_TOKEN>
+S17_SANDBOX_ROOT=
+S17_SKILLS_DIR=
+S17_WORKSPACE=<exact real path of PTF_WORKSPACE>
+S17_ALLOWED_COMMANDS=node
+S17_PROTECTED_PATHS=.physics-toy-workspace,P5_API.md,p5check.js,shell/**,tests/**,test/**,**/tests/**,**/test_*.py,**/*_test.py,conftest.py,**/conftest.py,pytest.ini,tox.ini,setup.cfg,pyproject.toml,.github/**
+S17_MAX_REPEAT_FAILURES=3
+S17_EXEC_CONTAINER=1
+S17_EXEC_IMAGE=physics-toy-factory-node:22.20.0-phase6
+```
+
+```bash
+cd S17Code && uv sync && uv run s17code serve
+```
+
+Keep `S17_SANDBOX_ROOT` and `S17_SKILLS_DIR` present but empty. S17 loads its repository `.env` on
+import; unsetting them lets dotenv restore generic capabilities outside this profile.
+
+**4. Product — port 8120**
+
+```bash
+cp .env.example .env          # then set the token and both absolute paths
+uv sync --locked --dev
+uv run playwright install chromium
+uv run physics-toy-factory
+```
+
+**5. Confirm the topology before typing a prompt**
+
+```bash
+curl -s http://127.0.0.1:8120/api/health
+```
+
+Expect `"status": "ok"` with `workspace.verified: true` and both `s17.process.up` and
+`s17.gateway.ready` true. If any of those is false the UI says so and refuses to start a run rather
+than failing halfway through one.
+
+Requirements: Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Node.js 20+ as `node`, Docker, and
+Playwright Chromium for the browser tests. There is deliberately no npm project, frontend build, or
+runtime CDN dependency. On first start the product copies its immutable seed into `PTF_WORKSPACE`,
+git-inits it, and tags `physics-toy-base-v1` — the tag reset returns to.
+
+Running all three on relocated ports, or diagnosing a bring-up, is covered step by step in
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
 
 ## How it works
 
-1. **You send a prompt.** The product validates it against `PTF_MAX_PROMPT_CHARS` and embeds it as
-   delimited, untrusted data inside a fixed goal template (`prompts.py`). Browser text is never
-   treated as instructions to the product.
+1. **You send a prompt.** It is validated against `PTF_MAX_PROMPT_CHARS` and embedded as delimited,
+   untrusted data inside a fixed goal template (`prompts.py`). Browser text is never treated as
+   instructions to the product.
 2. **The product starts one S17 run** with an explicit authority list — `create_file`, `edit_code`,
    `run_command` for a creation; only `edit_code` and `run_command` for a follow-up. The browser
    never chooses the workspace, the upstream URL, or the authority.
-3. **The agent writes `sketch.js`** in the validated workspace and runs the checker itself:
-   `node p5check.js sketch.js`. The checker executes the sketch in a Node `vm` with a 100 ms
-   timeout, drives five `draw()` frames, and rejects network, storage, DOM, and dynamic-code access
-   as well as unsupported or misspelled p5 APIs. A red checker result is normal — the agent reads
-   the bounded error evidence and repairs its own code.
+3. **The agent writes `sketch.js`** and runs the checker itself: `node p5check.js sketch.js`. The
+   checker executes the sketch in a Node `vm` with a 100 ms timeout, drives five `draw()` frames,
+   and rejects network, storage, DOM, and dynamic-code access as well as unsupported or misspelled
+   p5 APIs.
 4. **The product classifies the finished run** with `classify_graph` in `orchestrator.py`. A run is
    ready only if it finished, contains a succeeded `answer_with_evidence` node, and its *latest*
    node whose command normalizes to exactly `node p5check.js sketch.js` did not time out and exited
@@ -40,30 +141,49 @@ with its run graphs under `docs/evidence/phase6/full-requalification-2026-08-16/
 6. **The toy becomes interactive** once the shell reports two animation frames. If it does not
    report in time, the readiness watchdog destroys the frame.
 
-## Prerequisites
+## Watch it fail
 
-- Python 3.12 or newer
-- [`uv`](https://docs.astral.sh/uv/)
-- Node.js 20 or newer available as `node`
-- Playwright Chromium, for the browser test journeys
-- Docker, to run generated code in the pinned non-root container image
+Every clone looks good on the happy path, so here is where to look for this one's failures. All of
+these are real, reachable states, and most are pinned by tests.
 
-Node is an external runtime prerequisite. There is intentionally no npm project, JavaScript package
-manager, frontend build, or runtime CDN dependency.
+| Failure | What you see |
+| --- | --- |
+| **The checker rejects the agent's code** | The red-to-green chain above. Normal, and the run still succeeds. |
+| **The agent never converges** | The run finishes without a passing latest checker, `classify_graph` returns `checker_failed`, and no preview is offered. There is no "nearly worked" state. |
+| **The toy breaks in your browser only** | The shell reports the error, it is recorded against the run and shown as text — and no repair run is started. A browser-only failure is display-only by design. |
+| **The toy never starts drawing** | The watchdog destroys the iframe after `PTF_PREVIEW_READY_TIMEOUT_SECONDS` and says so. |
+| **S17 or the gateway is down** | `/api/health` reports `degraded`, the UI shows an explicit banner, and run creation is disabled instead of timing out. |
+| **You ask for a second follow-up** | HTTP 409, refused before any S17 run starts. |
+| **You reset mid-run** | HTTP 409. Reset is refused while a run is active. |
+| **The workspace has been tampered with** | Fixture hashes fail validation and the product refuses to start, reset, read code, or preview. |
 
-## Setup
+Two failures are kept as artifacts rather than described:
 
-```bash
-cp .env.example .env
-uv sync --locked --dev
-uv run playwright install chromium
-uv run physics-toy-factory
-```
+- [`docs/evidence/phase6/repair-proof/`](docs/evidence/phase6/repair-proof/) — a genuine live
+  red-to-green repair: a deliberately broken sketch installed, the checker failing at sequence 5,
+  one anchored edit, and the checker passing at sequence 13. The tooling that produced it fails
+  closed; it will not accept a first-attempt pass as repair evidence.
+- [`docs/evidence/phase6/live-qualification/`](docs/evidence/phase6/live-qualification/) — the
+  **failed** first qualification of 2026-08-15. All five creations finished without
+  `answer_with_evidence`, the follow-up was refused with HTTP 409, and no preview was ever
+  verified. It is preserved rather than overwritten.
 
-The server binds to `127.0.0.1:8120` by default. On first startup the app copies its immutable seed
-to `PTF_WORKSPACE`, initializes that directory as a dedicated Git repository, and records the base
-fixture as the tag `physics-toy-base-v1`. That tag is what reset returns to. Start the S17 service
-with the launch profile below before creating a run.
+## Using it
+
+The UI offers four suggested prompts — **Rain that avoids my mouse**, **Bouncy magnets**, **Angry
+solar system**, **Fish that follow my cursor** — or you can write your own.
+
+- **One linked follow-up.** After a successful run you may ask for exactly one modification. It runs
+  with edit-only authority against the existing sketch, and the new verified revision replaces the
+  old preview.
+- **Saved runs.** Accepted runs, their graphs, and their verified sketch bytes are stored in
+  `PTF_ARTIFACT_DIR/history.sqlite3`. The archive reopens any run's evidence, code, and verified
+  preview read-only, with search, paging, and delete. Archived bytes are re-checked against their
+  recorded length and hash on every read.
+- **Restart safety.** The current session is restored on restart and can reconnect only to its own
+  previously accepted S17 run.
+- **Reset** returns the workspace to the `physics-toy-base-v1` tag and starts a new session. It does
+  not delete saved runs.
 
 ## Configuration
 
@@ -98,51 +218,9 @@ product process only lets `/api/health` report the configured execution mode; th
 verifies that the container runtime is actually present, and `secure_sandbox_claimed` in that
 response is always `false`.
 
-## Running the S17 engine
-
-The interactive product path needs an S17Code process pointed at the exact same real workspace path,
-started with this product-specific profile:
-
-```text
-S17_CONTROL_TOKEN=<same private value as PTF_S17_CONTROL_TOKEN>
-S17_SANDBOX_ROOT=
-S17_SKILLS_DIR=
-S17_WORKSPACE=<exact real path of PTF_WORKSPACE>
-S17_ALLOWED_COMMANDS=node
-S17_PROTECTED_PATHS=.physics-toy-workspace,P5_API.md,p5check.js,shell/**,tests/**,test/**,**/tests/**,**/test_*.py,**/*_test.py,conftest.py,**/conftest.py,pytest.ini,tox.ini,setup.cfg,pyproject.toml,.github/**
-S17_MAX_REPEAT_FAILURES=3
-S17_EXEC_CONTAINER=1
-S17_EXEC_IMAGE=<pinned non-root Node image>
-```
-
-Keep the sandbox and skills variables present but empty. S17 loads its repository `.env` on import;
-unsetting them would let dotenv restore generic capabilities outside the product workspace profile.
-
-`containers/phase6-node.Dockerfile` is the digest-pinned, non-root Node image used to execute
-generated code. For a full hand-driven bring-up of the three-process topology, see
-[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
-
-## Using it
-
-The UI offers four suggested prompts — **Rain that avoids my mouse**, **Bouncy magnets**, **Angry
-solar system**, **Fish that follow my cursor** — or you can write your own.
-
-- **Watch the work.** Activity streams live over SSE: planning, file writes, each checker attempt
-  and its result, and the final answer. A failed checker followed by a repair is the normal shape of
-  a run, and the journal shows it rather than hiding it.
-- **One linked follow-up.** After a successful run you may ask for exactly one modification. It runs
-  with edit-only authority against the existing sketch, and the new verified revision replaces the
-  old preview. A second follow-up is refused without starting a run.
-- **Saved runs.** Accepted runs, their graphs, and their verified sketch bytes are stored in
-  `PTF_ARTIFACT_DIR/history.sqlite3`. The saved-run library reopens any run's evidence, code, and
-  verified preview read-only, with search, paging, and delete. Archived bytes are re-checked against
-  their recorded length and hash on every read.
-- **Restart safety.** The current session is restored on restart and can reconnect only to its own
-  previously accepted S17 run. Runs created before the catalog existed are not imported.
-- **Reset** returns the workspace to the `physics-toy-base-v1` tag and starts a new session. It is
-  refused while a run is active, and it does not delete saved runs.
-
 ## HTTP API
+
+What the browser may call:
 
 | Method and path | Purpose |
 | --- | --- |
@@ -174,6 +252,15 @@ The browser never supplies a filesystem path, an upstream URL, or an arbitrary r
 receives the S17 control token. Every failure returns the same envelope:
 `{"error": {"code": ..., "message": ..., "retryable": ...}}`.
 
+What the product calls upstream, from `s17_client.py` — the whole of its dependency on the engine:
+
+| S17 endpoint | Use |
+| --- | --- |
+| `POST /v1/agent/runs/async` | Start a run with the goal, the authority list, the budget ceiling, and a stable demo principal. |
+| `GET /v1/agent/runs/{id}` | Poll the raw graph. |
+| `GET /v1/runs/{id}/events` | Stream events, re-emitted to the browser as SSE. |
+| `GET /healthz`, `GET /readyz` | Probe the engine and gateway for `/api/health`. |
+
 ## Security model
 
 Generated `sketch.js` is untrusted. Everything else — the seed workspace, `trusted_assets.json`, the
@@ -184,12 +271,12 @@ checker, the marker, the shell, the tests, and the packaging — is trusted prod
   base tag, and the SHA-256 and size of every trusted asset. It refuses source-repository roots,
   `$HOME`, the filesystem root, symlinked components, and tampered fixtures. Subprocesses run
   without a shell, with the validated workspace as an explicit `cwd`.
-- **Previews are caged.** Each preview response carries a strict per-response CSP with a fresh
-  nonce (`default-src 'none'`, `connect-src 'none'`), `Referrer-Policy: no-referrer`,
+- **Previews are caged.** Each preview response carries a strict per-response CSP with a fresh nonce
+  (`default-src 'none'`, `connect-src 'none'`), `Referrer-Policy: no-referrer`,
   `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and a `Permissions-Policy` denying
-  camera, microphone, geolocation, display capture, payment, and USB. The iframe is created only
-  for the current verified hash and carries exactly `sandbox="allow-scripts"`. Messages from the
-  wrong window or with the wrong preview ID are ignored.
+  camera, microphone, geolocation, display capture, payment, and USB. The iframe is created only for
+  the current verified hash and carries exactly `sandbox="allow-scripts"`. Messages from the wrong
+  window or with the wrong preview ID are ignored.
 - **p5.js is vendored, never fetched.** Version 2.3.1 (LGPL-2.1) is served from the validated
   workspace copy with its license and third-party notices, and its hash is recorded in
   `trusted_assets.json`. No runtime CDN is used anywhere.
@@ -217,13 +304,13 @@ service with recorded graph and SSE fixtures. It covers configuration validation
 and reset, the S17 client contract, readiness classification, the HTTP API including history and
 restart durability, the qualification tooling, and the checker itself.
 
-Browser journeys are Playwright-driven against the real product surface and the fake S17, and are
-split by marker:
+Browser journeys are Playwright-driven against the real product surface and the fake S17, split by
+marker:
 
 | Selection | Journey |
 | --- | --- |
 | `uv run pytest -q -m "browser and activity"` | Recorded red-to-green activity, run evidence and degraded shapes, safe dialogs, reconnect snapshot deduplication, honest terminal failure. |
-| `uv run pytest -q -m "browser and preview"` | The verified-preview cage rejecting hostile capabilities, the watchdog destroying an unresponsive frame, and the saved-run library reopening evidence, code, and preview before deleting safely. |
+| `uv run pytest -q -m "browser and preview"` | The verified-preview cage rejecting hostile capabilities, the watchdog destroying an unresponsive frame, and the saved-run archive reopening evidence, code, and preview before deleting safely. |
 | `uv run pytest -q -m "browser and follow_up"` | One linked follow-up replacing the preview after a read, an anchored edit, and a passing checker. |
 
 Chromium installation is explicit and is never performed by the test suite. If Node is absent, the
@@ -247,14 +334,53 @@ revisions were re-pinned. Only a single-creation canary has passed at the curren
 full suite belongs to the superseded ones.
 
 - [`docs/PHASE6_RUNBOOK.md`](docs/PHASE6_RUNBOOK.md) — the reproducible qualification procedure:
-  pinned revisions, the container profile, the exact scripted runs, and the evidence review. The
-  tooling fails if a run does not converge, and never turns a first-attempt pass or a fabricated
-  event into repair evidence.
-- [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) — hand-driven bring-up for demonstration,
-  exploration, or diagnosis. A hand-driven run produces no sanitized graph, hash set, or reviewed
-  summary, and is never publishable evidence.
+  pinned revisions, the container profile, the exact scripted runs, and the evidence review.
 - [`docs/evidence/phase6/EVIDENCE.md`](docs/evidence/phase6/EVIDENCE.md) — the full append-only
-  record, including the earlier failed qualification, which is preserved rather than overwritten.
+  record, including the failed first qualification.
+
+## How this maps to Session 17
+
+The session's commitments, and where each one is actually enforced. Several belong to the engine;
+this product configures and depends on them rather than implementing them.
+
+| Session 17 commitment | In this product | Enforced by |
+| --- | --- | --- |
+| **The judge is out of reach** | `p5check.js`, `P5_API.md`, the shell, and the workspace marker are all in `S17_PROTECTED_PATHS`. The agent runs the checker on every attempt and may never edit it. | Product config + engine guard |
+| **Read before you edit, name one place** | The follow-up run's recorded graph shows `read_code` before a single anchored `edit_code`. | Engine |
+| **Nothing runs free** | `S17_ALLOWED_COMMANDS=node` and nothing else. No shell, the validated workspace as explicit `cwd`, bounded output, and container execution with networking disabled. | Product config + engine |
+| **A failing test is evidence, not an error** | `classify_graph` reads the *latest* checker result, so red-then-green is a pass and a red final attempt is not. The failures stay visible in the journal. | Product |
+| **The loop is a straight line** | Each attempt is its own node; the evidence viewer renders all eight steps forward, with nothing pointing back. | Engine graph, product rendering |
+| **A skill is instruction, never authority** | This product ships no skills and pins `S17_SKILLS_DIR` empty. Authority comes only from the per-run `allowed_side_effects` list, which no prompt or file can widen. | Product |
+| **The judge only knows what you asked it** | Stated honestly: `p5check.js` drives five `draw()` frames in a Node `vm`. It proves a sketch loads, draws, and stays inside the allowed p5 surface. It cannot prove the toy is *fun*, and a sketch that draws a blank canvas can pass it. | — |
+
+That last row is the real ceiling. The checker is a free judge, and deciding what it should measure
+is still a human's job.
+
+## Authorship
+
+Stated plainly, as the assignment requires.
+
+**Claude Code wrote essentially all of the implementation** — the Python services, the browser UI,
+the checker, the tests, and the qualification tooling. Every feature landed on its own branch and
+was merged by pull request; the commit history shows this.
+
+**The human contribution was direction, not typing:** the product concept and scope, the
+architecture and phase boundaries, the security invariants (the trust boundary, the workspace
+identity rules, the no-CDN and render-as-text rules, the authority lists), the acceptance gates each
+phase had to pass, and the review and merge of every branch. Those constraints are recorded in
+`CLAUDE.md` and were enforced across sessions.
+
+Where a prompt specified exact behavior, that behavior is the human's work by the assignment's own
+standard, and a fair amount of it was specified that precisely — particularly the refusals.
+
+## Submission
+
+| Item | Link |
+| --- | --- |
+| **YouTube demo** (900) | `TODO: paste unlisted video URL` |
+| **GitHub repo + README** (900) | this repository |
+| **Bug PR to glc_v5** (100) | `TODO: paste PR URL` |
+| **Bug PR to S17Code** (100) | `TODO: paste PR URL` |
 
 ## Scope
 
