@@ -231,10 +231,46 @@ The same probe with `DOCKER_HOST` unset returned exit `125` and
 `Cannot connect to the Docker daemon at unix:///var/run/docker.sock`, reproducing the defect that
 stopped `run-e48a22aa0e57`. That variable is now a required export in the runbook.
 
+### Re-pin solar canary: passed
+
+One separately authorized canary was run on 2026-08-16 at the re-pinned revisions. No retry was used.
+It supersedes the limitation previously recorded here, for the creation path only.
+
+- PhysicsToyFactory revision: `5dcbafacad31ff7091ac86a75c0cd95168a3d302`
+- S17Code revision: `7bf4b1e937699449a6a883e4862184559db1a91b`
+- glc_v5 revision: `77054f4b7a4d9879d33c5221ff08a35fdf48eb10`
+- Endpoints: gateway `127.0.0.1:8211`, S17 `127.0.0.1:8213`, product `127.0.0.1:8220`
+- Prompt: `Create a tiny solar system.`
+- Run ID: `run-a7dbd68348a4`
+- Recorded at: `2026-08-16T10:34:29Z`
+- Outcome: ready, with a succeeded `answer_with_evidence` node
+- Latest and only checker: exit `0`, `P5CHECK PASS frames=5 draw_calls=560`
+- Checker cage: `docker run --rm --network=none --memory=1g --cpus=1 --pids-limit=256` on the pinned
+  non-root image, unchanged at
+  `sha256:1592c97f88b3d45ad796dd292877010dc5bbf2d6b90a7742f4507ed3ae6d4524`
+- Sketch SHA-256: `21678fe776910457d9c4fb46ae29b0f187bdea02f333367814c647e652dab5ad`
+- Model routes: `openrouter/google/gemini-3.7-flash` for eight planner calls and
+  `gemini_1/gemini-3.5-flash-lite` for one answer call
+- S17 controller spend: `$0.03558462` of the `$0.50` ceiling, zero budget refusals
+- Gateway list-price ledger: `$0.05076150` across the same nine calls, all `ok`, 53,328 input and
+  9,178 output tokens
+- Browser observation: passed; verified sandboxed preview with a visible, pointer-responsive canvas
+  and no system-error banner
+
+The default ports were occupied by an unrelated local stack, so the topology was relocated as
+permitted by the runbook; the relocated ports are recorded above. The gateway ran on a fresh
+qualification-private `GLC_GATEWAY_DB`, and S17 on a fresh `S17_DATA_DIR`, so the nine ledger rows
+and the run ID belong to this canary alone. The controller and gateway figures are different
+accounting views of the same nine calls and are reported separately, as elsewhere in this record.
+
+The selected graph, event tape, summary, and screenshot are in `canary-repin-2026-08-16/`. The
+published evidence was checked for authorization material and machine-local paths before commit; the
+graph's workspace path is sanitized to `<PTF_WORKSPACE>` by the publisher.
+
 ### Unresolved limitation
 
-**No live model run has been executed at the re-pinned revisions.** The deterministic gates above are
-not a live gate, and this addendum does not extend the passing live qualification to them. Qualifying
-at the re-pinned revisions requires a separately authorized canary followed by the full suite,
-published as its own evidence set. The retained live pass remains attributable only to the revisions
-recorded in the sections above.
+**The full suite has not been rerun at the re-pinned revisions.** This canary proves the
+demo-critical creation path only. The four suggested prompts and the linked glowing-trails follow-up
+remain qualified solely at the superseded revisions, so the complete Phase 6 live gate at the
+re-pinned revisions is not yet established. A full requalification requires separate authorization
+and its own evidence set.

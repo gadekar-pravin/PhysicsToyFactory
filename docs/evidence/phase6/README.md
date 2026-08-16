@@ -12,7 +12,10 @@ The selected evidence set is organized as follows:
 - `canary-2026-08-16/`: the separately authorized, successful post-remediation solar creation graph,
   event tape, summary, and verified-preview screenshot;
 - `full-requalification-2026-08-16/`: the successful, no-retry six-run post-remediation suite with
-  sanitized graphs, event tapes, summary, and final linked-preview screenshot; and
+  sanitized graphs, event tapes, summary, and final linked-preview screenshot;
+- `canary-repin-2026-08-16/`: the separately authorized, successful single creation canary at the
+  re-pinned dependency revisions, with sanitized graph, event tape, summary, and verified-preview
+  screenshot; and
 - `EVIDENCE.md`: deterministic gates, live environment revisions, run IDs, observed outcomes, and any
   unresolved limitation.
 
