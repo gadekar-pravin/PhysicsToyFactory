@@ -9,6 +9,8 @@ The selected evidence set is organized as follows:
 - `live-qualification/`: sanitized graphs and event tapes for all four suggested prompts plus the
   exact solar-system create/follow-up demo, a summary, and a final linked-preview screenshot only
   when the live runs reach a verified preview; and
+- `canary-2026-08-16/`: the separately authorized, successful post-remediation solar creation graph,
+  event tape, summary, and verified-preview screenshot; and
 - `EVIDENCE.md`: deterministic gates, live environment revisions, run IDs, observed outcomes, and any
   unresolved limitation.
 

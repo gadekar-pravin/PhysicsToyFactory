@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -21,7 +22,7 @@ from physics_toy_factory.qualification import (
     refresh_published_artifact_hashes,
     sanitize_for_publication,
 )
-from scripts.qualify_live_product import LiveProductQualifier
+from scripts.qualify_live_product import LiveProductQualifier, ScenarioResult
 
 
 def repair_graph(*, latest_exit: int = 0, anchored: bool = True) -> dict:
@@ -259,6 +260,49 @@ def test_phase6_runbook_blocks_s17_dotenv_root_repopulation(
 
     assert os.environ["S17_SANDBOX_ROOT"] == ""
     assert os.environ["S17_SKILLS_DIR"] == ""
+
+
+@pytest.mark.asyncio
+async def test_solar_canary_mode_starts_exactly_one_creation(tmp_path: Path, monkeypatch) -> None:
+    qualifier = LiveProductQualifier(
+        product_base_url="http://product.test",
+        artifact_dir=tmp_path / "artifacts",
+        workspace=tmp_path / "workspace",
+        control_token="private-token",
+    )
+    reset = AsyncMock()
+    execute = AsyncMock(
+        return_value=ScenarioResult(
+            name="canary-create-tiny-solar-system",
+            prompt="Create a tiny solar system.",
+            run_id="run-canary",
+            kind="create",
+            outcome="ready",
+            reason="ready",
+            sketch_sha256="a" * 64,
+            model_routes=[{"provider": "openrouter", "model": "frontier-model"}],
+            raw_graph_name="canary.graph.json",
+            raw_graph_sha256="b" * 64,
+            event_tape_name="canary.events.jsonl",
+            event_tape_sha256="c" * 64,
+        )
+    )
+    monkeypatch.setattr(qualifier, "_reset", reset)
+    monkeypatch.setattr(qualifier, "_execute", execute)
+
+    artifact_dir = await qualifier.run_solar_canary(publish_dir=None)
+
+    reset.assert_awaited_once()
+    execute.assert_awaited_once()
+    assert execute.await_args.kwargs == {
+        "name": "canary-create-tiny-solar-system",
+        "prompt": "Create a tiny solar system.",
+        "endpoint": "/api/runs",
+        "expected_kind": "create",
+    }
+    summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["evidence_kind"] == "live_product_canary"
+    assert summary["scenario_count"] == 1
 
 
 @pytest.mark.asyncio

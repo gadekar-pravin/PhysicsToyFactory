@@ -25,15 +25,15 @@ PhysicsToyFactory:
 ```text
 uv sync --locked --dev                         PASS
 uv run ruff check .                            PASS
-uv run pytest -q -m "not browser"              PASS: 177 passed, 8 deselected
-uv run pytest -q -m browser                    PASS: 8 passed, 177 deselected
+uv run pytest -q -m "not browser"              PASS: 183 passed, 8 deselected
+uv run pytest -q -m browser                    PASS: 8 passed, 183 deselected
 ```
 
 S17Code at the live dependency revision:
 
 ```text
 uv run ruff check .                            PASS
-uv run pytest -q                               PASS: 496 passed, 1 skipped
+uv run pytest -q                               PASS: 493 passed, 1 skipped
 Phase 0 offline budget proof                   PASS
 Phase 0 offline denial-of-wallet proof         PASS
 Phase 0 offline trace-export proof             PASS, including node spans
@@ -92,6 +92,32 @@ The Phase 6 implementation and deterministic gates pass. The live Phase 6 releas
 There is no verified linked preview, so browser/manual screenshot capture was correctly not run and
 the specified MVP must not yet be described as live-qualified.
 
-Before another paid qualification, diagnose why the live S17 graphs repeatedly finish without
-`answer_with_evidence`; then rerun the five creates, the linked follow-up, and browser observation as
-a new dated evidence set.
+At the time of this failed evidence set, the required next step was to diagnose why the live S17
+graphs repeatedly finished without `answer_with_evidence`. The separately approved post-remediation
+canary is recorded below.
+
+## Post-remediation solar canary: passed
+
+One separately authorized canary was run on 2026-08-16 after attaching a `$0.50` product-run budget
+and correcting the dotenv-resistant S17 capability profile. No retry was used.
+
+- PhysicsToyFactory revision: `90fdeafb3e94dd71967e2fbc06d0d9b17a795a81`
+- S17Code revision: `4e085cb2e869694f036df2a6171530e147077e85`
+- glc_v5 revision: `66ed155addd78fe8f59673ddca59e0277a7d39e8`
+- Prompt: `Create a tiny solar system.`
+- Run ID: `run-1eb7223615ef`
+- Recorded at: `2026-08-16T08:39:56Z`
+- Outcome: ready, with a succeeded `answer_with_evidence` node
+- Latest and only checker: exit `0`, `P5CHECK PASS frames=5 draw_calls=805`
+- Checker cage: pinned non-root image with `--network=none`
+- Sketch SHA-256: `a45ceeaacef07afb8ae7d0286ba2e52d992fcc5609b51955cf2df82d3351fc77`
+- Model routes: `openrouter/google/gemini-3.7-flash` for seven planner calls and
+  `gemini_1/gemini-3.5-flash-lite` for one answer call
+- S17 controller spend: `$0.02610480` of the `$0.50` ceiling
+- Gateway list-price ledger: `$0.03809030` across the same eight calls
+- Browser observation: passed; verified sandboxed preview and interactive canvas visible with no
+  system-error banner
+
+The selected graph, event tape, summary, and screenshot are in `canary-2026-08-16/`. This proves the
+minimal remediation on the demo-critical creation path. It does not complete the full Phase 6 gate:
+the four suggested prompts and linked glowing-trails follow-up have not been rerun.

@@ -133,6 +133,21 @@ secret-checked before publication.
 
 ## 8. Qualify all prompts and the exact two-step demo
 
+After a configuration correction, obtain explicit approval for one paid canary before repeating the
+full suite. This mode resets the product and starts exactly one solar creation; it never runs a
+suggested prompt or follow-up:
+
+```bash
+uv run python scripts/qualify_live_product.py \
+  --solar-canary-only \
+  --publish-dir docs/evidence/phase6/canary-YYYY-MM-DD
+```
+
+Require a metered frontier planner route, succeeded `answer_with_evidence`, latest checker exit `0`,
+verified sketch hash, and ready preview before authorizing broader qualification.
+
+### Full qualification
+
 This command performs one attempt for each suggested prompt, then creates the exact solar-system demo
 and applies the one linked glowing-trails follow-up. It leaves that final verified revision ready for
 browser observation:

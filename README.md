@@ -163,6 +163,11 @@ Product runs include the validated `PTF_S17_RUN_BUDGET_USD` ceiling (default `$0
 demo principal. This keeps creation and follow-up on S17's configured, metered model ladder rather
 than its unbudgeted gateway default.
 
+The separately authorized 2026-08-16 solar canary passed on that corrected profile: one budgeted run
+produced a passing container checker, succeeded `answer_with_evidence`, verified interactive preview,
+and retained screenshot. The full release gate remains incomplete until the four suggested prompts
+and linked follow-up are rerun successfully.
+
 ## Trusted fixture
 
 The packaged fixture contains the workspace marker, `P5_API.md`, `p5check.js`, and the entire iframe

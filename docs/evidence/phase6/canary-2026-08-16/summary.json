@@ -1,0 +1,44 @@
+{
+  "browser_observation": {
+    "checks": [
+      "ready preview state",
+      "sandboxed iframe visible",
+      "canvas visible and responsive to pointer movement",
+      "no product system-error banner"
+    ],
+    "outcome": "passed",
+    "recorded_at": "2026-08-16T08:40:22Z",
+    "screenshot": "verified-solar-canary.png",
+    "screenshot_sha256": "5744a2c577e5156fc6b21f26229cc9ab0564f9aa2831bd5150d24efec3807d10"
+  },
+  "evidence_kind": "live_product_canary",
+  "outcome": "passed",
+  "recorded_at": "2026-08-16T08:39:56Z",
+  "scenario_count": 1,
+  "scenarios": [
+    {
+      "event_tape_name": "canary-create-tiny-solar-system.events.jsonl",
+      "event_tape_sha256": "204f547aebc3e3fa7ad724cb5f14c506e57c443a3f0cefe4ed046d72dbe488f1",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_1"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "canary-create-tiny-solar-system",
+      "outcome": "ready",
+      "prompt": "Create a tiny solar system.",
+      "raw_graph_name": "canary-create-tiny-solar-system.graph.json",
+      "raw_graph_sha256": "696bd167ca396c40d73960afd58ff0a1633451016f8eea888a4176962aaf16fc",
+      "reason": "ready",
+      "run_id": "run-1eb7223615ef",
+      "sketch_sha256": "a45ceeaacef07afb8ae7d0286ba2e52d992fcc5609b51955cf2df82d3351fc77"
+    }
+  ],
+  "schema_version": 1
+}

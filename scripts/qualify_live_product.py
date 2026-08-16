@@ -60,10 +60,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--product-base-url", default="http://127.0.0.1:8120")
     parser.add_argument("--timeout-seconds", type=float, default=900)
     parser.add_argument("--publish-dir", type=Path)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--recover-dir",
         type=Path,
         help="Finalize a stopped failed qualification from its ignored artifact directory.",
+    )
+    mode.add_argument(
+        "--solar-canary-only",
+        action="store_true",
+        help="Run exactly one solar-system creation canary; never run suggestions or follow-up.",
     )
     return parser.parse_args()
 
@@ -153,20 +159,9 @@ class LiveProductQualifier:
                 )
             )
 
-        passed = all(result.outcome == "ready" for result in results)
-        summary = {
-            "schema_version": 1,
-            "evidence_kind": "live_product_qualification",
-            "recorded_at": utc_timestamp(),
-            "outcome": "passed" if passed else "failed",
-            "scenario_count": len(results),
-            "scenarios": [result.__dict__ for result in results],
-            "browser_observation": "pending screenshot capture",
-        }
-        summary_path = self._artifact_root / "summary.json"
-        summary_path.write_text(
-            json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        passed = self._write_summary(
+            results,
+            evidence_kind="live_product_qualification",
         )
         if publish_dir is not None:
             self._publish(publish_dir)
@@ -178,6 +173,55 @@ class LiveProductQualifier:
             )
             raise QualificationError(f"one or more live scenarios failed: {failures}")
         return self._artifact_root
+
+    async def run_solar_canary(self, *, publish_dir: Path | None) -> Path:
+        """Run exactly one demo-critical creation attempt and retain its real outcome."""
+
+        timeout = httpx.Timeout(connect=5, read=None, write=10, pool=5)
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            await self._reset(client)
+            result = await self._execute(
+                client,
+                name="canary-create-tiny-solar-system",
+                prompt=SOLAR_PROMPT,
+                endpoint="/api/runs",
+                expected_kind="create",
+            )
+
+        passed = self._write_summary(
+            [result],
+            evidence_kind="live_product_canary",
+        )
+        if publish_dir is not None:
+            self._publish(publish_dir)
+        if not passed:
+            raise QualificationError(f"solar canary failed: {result.reason}")
+        return self._artifact_root
+
+    def _write_summary(
+        self,
+        results: list[ScenarioResult],
+        *,
+        evidence_kind: str,
+    ) -> bool:
+        """Write one honest summary and return whether every recorded scenario passed."""
+
+        passed = all(result.outcome == "ready" for result in results)
+        summary = {
+            "schema_version": 1,
+            "evidence_kind": evidence_kind,
+            "recorded_at": utc_timestamp(),
+            "outcome": "passed" if passed else "failed",
+            "scenario_count": len(results),
+            "scenarios": [result.__dict__ for result in results],
+            "browser_observation": "pending screenshot capture",
+        }
+        summary_path = self._artifact_root / "summary.json"
+        summary_path.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return passed
 
     async def _reset(self, client: httpx.AsyncClient) -> None:
         payload = await self._json(client, "POST", "/api/session/reset", expected=200)
@@ -472,8 +516,12 @@ async def run(args: argparse.Namespace) -> int:
         control_token=settings.s17_control_token.get_secret_value(),
     )
     async with asyncio.timeout(args.timeout_seconds):
-        artifact_dir = await qualifier.run(publish_dir=args.publish_dir)
-    print(f"live_qualification=passed artifact_dir={artifact_dir}")
+        if args.solar_canary_only:
+            artifact_dir = await qualifier.run_solar_canary(publish_dir=args.publish_dir)
+        else:
+            artifact_dir = await qualifier.run(publish_dir=args.publish_dir)
+    outcome = "solar_canary" if args.solar_canary_only else "live_qualification"
+    print(f"{outcome}=passed artifact_dir={artifact_dir}")
     return 0
 
 
