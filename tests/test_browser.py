@@ -254,6 +254,30 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
 ) -> None:
     graph = copy.deepcopy(recorded_graph)
     hostile_node_id = '<img id="node-attack" src=x onerror=alert(1)>'
+    for event in graph["events"]:
+        if event["sequence"] >= 3:
+            event["sequence"] += 2
+    graph["events"][2:2] = [
+        {"sequence": 3, "kind": "task_started", "node_id": "read_api", "payload": {}},
+        {"sequence": 4, "kind": "task_succeeded", "node_id": "read_api", "payload": {}},
+    ]
+    answer_event = next(
+        event
+        for event in graph["events"]
+        if event.get("node_id") == "answer" and event["kind"] == "task_succeeded"
+    )
+    answer_event["sequence"] += 1
+    answer_index = graph["events"].index(answer_event)
+    graph["events"].insert(
+        answer_index,
+        {"sequence": answer_event["sequence"] - 1, "kind": "task_started", "node_id": "answer", "payload": {}},
+    )
+    graph["nodes"]["read_api"] = {
+        "skill": "read_code",
+        "state": "succeeded",
+        "input": {"path": "P5_API.md"},
+        "result": {"path": "P5_API.md"},
+    }
     graph["nodes"]["repair"]["state"] = "failed"
     graph["nodes"][hostile_node_id] = {
         "skill": "custom_untrusted_step",
@@ -262,7 +286,6 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
     }
     graph["edges"] = [
         ["write", "check_red"],
-        ["check_red", "repair"],
         ["repair", "check_green"],
         ["check_green", "answer"],
         ["write", "missing-node"],
@@ -282,13 +305,34 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
     )
     await expect(browser_page.locator("#run-panel-overview")).to_be_visible()
     summary = browser_page.locator(".run-summary-grid")
-    for expected in ("run-fake-1", "Completed", "6", "5", "12"):
+    for expected in ("run-fake-1", "Completed", "7", "4", "15"):
         await expect(summary).to_contain_text(expected)
-    await expect(browser_page.locator(".run-status-counts")).to_contain_text("Succeeded 4")
+    await expect(browser_page.locator(".run-status-counts")).to_contain_text(
+        "Runtime node states"
+    )
+    await expect(browser_page.locator(".run-status-counts")).to_contain_text("Succeeded 5")
     await expect(browser_page.locator(".run-status-counts")).to_contain_text("Failed 1")
     await expect(browser_page.locator(".run-status-counts")).to_contain_text("Unknown 1")
     steps = browser_page.locator(".run-step")
-    await expect(steps).to_have_count(6)
+    await expect(steps).to_have_count(7)
+    await expect(steps.filter(has_text="check_red").locator("summary")).to_contain_text(
+        "Validation failed"
+    )
+    await expect(steps.filter(has_text="check_green").locator("summary")).to_contain_text(
+        "Validation passed"
+    )
+    await expect(steps.filter(has_text="check_red").locator("summary")).to_contain_text(
+        "Execution completed"
+    )
+    await expect(steps.filter(has_text="read_api").locator("summary")).to_contain_text(
+        "No reported dependency"
+    )
+    await expect(steps.filter(has_text="read_api").locator("summary")).to_contain_text(
+        "Event 3"
+    )
+    await expect(steps.filter(has_text="check_red").locator("summary")).to_contain_text(
+        "Event 7"
+    )
     await expect(steps.last.locator("summary")).to_contain_text("Custom untrusted step")
     await steps.last.locator("summary").click()
     await expect(steps.last).to_contain_text("input-attack")
@@ -303,11 +347,105 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
     )
     await expect(browser_page.locator("#run-panel-graph")).to_be_visible()
     graph_nodes = browser_page.locator(".run-graph-node")
-    await expect(graph_nodes).to_have_count(6)
-    await expect(browser_page.locator("#run-graph-edges > path")).to_have_count(4)
+    await expect(graph_nodes).to_have_count(7)
+    await expect(browser_page.locator("#run-graph-legend")).to_contain_text(
+        "Dependency"
+    )
+    run_order_toggle = browser_page.locator("#run-order-toggle")
+    await expect(run_order_toggle).not_to_be_checked()
+    await expect(browser_page.locator("#run-order-legend")).to_be_hidden()
+    reported_paths = browser_page.locator(
+        '#run-graph-edges > path[data-edge-kind="reported"]'
+    )
+    observed_paths = browser_page.locator(
+        '#run-graph-edges > path[data-edge-kind="observed"]'
+    )
+    await expect(reported_paths).to_have_count(3)
+    await expect(observed_paths).to_have_count(0)
+    await run_order_toggle.check()
+    await expect(browser_page.locator("#run-order-legend")).to_be_visible()
+    await expect(browser_page.locator("#run-graph-note")).to_contain_text(
+        "Run order shows which task started next; it is not a dependency"
+    )
+    await expect(observed_paths).to_have_count(2)
+    assert await observed_paths.evaluate_all(
+        "paths => paths.map(path => [path.dataset.source, path.dataset.target])"
+    ) == [["read_api", "write"], ["check_red", "repair"]]
+    assert await observed_paths.evaluate_all(
+        "paths => paths.every(path => path.dataset.routeClear === 'true')"
+    )
+    assert await observed_paths.evaluate_all(
+        """paths => {
+          const canvas = document.querySelector('#run-graph-canvas').getBoundingClientRect();
+          const nodes = [...document.querySelectorAll('.run-graph-node')];
+          return paths.every(path => {
+            const excluded = new Set([path.dataset.source, path.dataset.target]);
+            const obstacles = nodes.filter(node => !excluded.has(node.dataset.nodeId)).map(node => {
+              const rect = node.getBoundingClientRect();
+              return {
+                left: rect.left - canvas.left,
+                right: rect.right - canvas.left,
+                top: rect.top - canvas.top,
+                bottom: rect.bottom - canvas.top,
+              };
+            });
+            const length = path.getTotalLength();
+            for (let offset = 1; offset < length - 1; offset += 2) {
+              const point = path.getPointAtLength(offset);
+              if (obstacles.some(rect => (
+                point.x > rect.left && point.x < rect.right
+                && point.y > rect.top && point.y < rect.bottom
+              ))) return false;
+            }
+            return true;
+          });
+        }"""
+    )
+    assert await observed_paths.evaluate_all(
+        "paths => paths.map(path => path.dataset.emphasis)"
+    ) == ["active", "muted"]
+    await expect(graph_nodes.filter(has_text="check_red")).to_contain_text(
+        "Validation failed"
+    )
+    await expect(graph_nodes.filter(has_text="check_red")).to_contain_text(
+        "Execution completed"
+    )
+    await expect(graph_nodes.filter(has_text="check_green")).to_contain_text(
+        "Validation passed"
+    )
+    await expect(graph_nodes.filter(has_text="read_api")).to_contain_text("Event 3")
+    await expect(graph_nodes.filter(has_text="read_api")).to_contain_text(
+        "No reported dependency"
+    )
     await expect(browser_page.locator("#run-graph-note")).to_contain_text(
         "1 malformed edge was not drawn"
     )
+    await graph_nodes.filter(has_text="check_red").click()
+    await expect(
+        browser_page.locator(
+            '#run-graph-edges > path[data-edge-kind="observed"]'
+            '[data-source="read_api"][data-target="write"]'
+        )
+    ).to_have_attribute("data-emphasis", "muted")
+    await expect(
+        browser_page.locator(
+            '#run-graph-edges > path[data-edge-kind="observed"]'
+            '[data-source="check_red"][data-target="repair"]'
+        )
+    ).to_have_attribute("data-emphasis", "active")
+    await expect(browser_page.locator("#run-inspector")).to_contain_text(
+        "Execution stateSucceeded"
+    )
+    await expect(browser_page.locator("#run-inspector")).to_contain_text(
+        "Validation resultFailed"
+    )
+    await run_order_toggle.focus()
+    await run_order_toggle.press("Space")
+    await expect(run_order_toggle).not_to_be_checked()
+    await expect(observed_paths).to_have_count(0)
+    await run_order_toggle.press("Space")
+    await expect(run_order_toggle).to_be_checked()
+    await expect(observed_paths).to_have_count(2)
     hostile_node = graph_nodes.filter(has_text="Custom untrusted step")
     await hostile_node.click()
     await expect(browser_page.locator("#run-inspector")).to_contain_text(hostile_node_id)
@@ -340,6 +478,22 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
                 "nodes": {
                     "active": {"skill": "read_code", "state": "running"},
                     "unknown": {"result": None},
+                    "checker_running": {
+                        "skill": "run_command",
+                        "state": "running",
+                        "input": {"command": "node p5check.js sketch.js"},
+                    },
+                    "checker_timeout": {
+                        "skill": "run_command",
+                        "state": "succeeded",
+                        "input": {"command": "node p5check.js sketch.js"},
+                        "result": {"exit_code": 1, "timed_out": True},
+                    },
+                    "checker_missing": {
+                        "skill": "run_command",
+                        "state": "succeeded",
+                        "input": {"command": "node p5check.js sketch.js"},
+                    },
                 },
                 "edges": [["active", "unknown"], ["unknown", "active"], ["active"], "bad"],
             }
@@ -356,9 +510,61 @@ async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
     await expect(browser_page.locator("#run-graph-note")).to_contain_text(
         "2 nodes are shown in an unresolved dependency group"
     )
-    await expect(graph_nodes).to_have_count(2)
-    await expect(browser_page.locator("#run-graph-edges > path")).to_have_count(2)
+    await expect(graph_nodes).to_have_count(5)
+    await expect(graph_nodes.filter(has_text="active")).to_contain_text("Execution running")
+    await expect(graph_nodes.filter(has_text="checker_running")).to_contain_text(
+        "Validation unavailable"
+    )
+    await expect(graph_nodes.filter(has_text="checker_running")).to_contain_text(
+        "Execution running"
+    )
+    await expect(graph_nodes.filter(has_text="checker_timeout")).to_contain_text(
+        "Validation timed out"
+    )
+    await expect(graph_nodes.filter(has_text="checker_missing")).to_contain_text(
+        "Validation unavailable"
+    )
+    await expect(reported_paths).to_have_count(2)
+    await expect(observed_paths).to_have_count(0)
     assert await dialog.locator("img").count() == 0
+
+    await browser_page.keyboard.press("Escape")
+    await browser_page.unroute("**/api/runs/run-fake-1")
+
+    async def parallel_graph(route: Route) -> None:
+        await route.fulfill(
+            json={
+                "run_id": "run-fake-1",
+                "finished": False,
+                "nodes": {
+                    node_id: {"skill": "read_code", "state": "succeeded"}
+                    for node_id in ("parallel_a", "parallel_b", "after_parallel")
+                },
+                "edges": [],
+                "events": [
+                    {"sequence": 1, "kind": "task_started", "node_id": "parallel_a"},
+                    {"sequence": 2, "kind": "task_started", "node_id": "parallel_b"},
+                    {"sequence": 3, "kind": "task_succeeded", "node_id": "parallel_a"},
+                    {"sequence": 4, "kind": "task_succeeded", "node_id": "parallel_b"},
+                    {"sequence": 5, "kind": "task_started", "node_id": "after_parallel"},
+                    {"sequence": 6, "kind": "task_succeeded", "node_id": "after_parallel"},
+                ],
+            }
+        )
+
+    await browser_page.route("**/api/runs/run-fake-1", parallel_graph)
+    await browser_page.locator("#view-run").click()
+    await browser_page.locator("#run-tab-graph").click()
+    await expect(reported_paths).to_have_count(0)
+    await expect(observed_paths).to_have_count(0)
+    await expect(graph_nodes.filter(has_text="parallel_a")).to_contain_text("Event 1")
+    await expect(graph_nodes.filter(has_text="parallel_b")).to_contain_text("Event 2")
+    await expect(graph_nodes.filter(has_text="after_parallel")).to_contain_text("Event 5")
+    await run_order_toggle.check()
+    await expect(observed_paths).to_have_count(1)
+    assert await observed_paths.evaluate_all(
+        "paths => paths.map(path => [path.dataset.source, path.dataset.target])"
+    ) == [["parallel_b", "after_parallel"]]
 
 
 @pytest.mark.browser

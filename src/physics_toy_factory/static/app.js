@@ -63,6 +63,8 @@ const elements = {
   },
   runOverview: document.querySelector("#run-overview"),
   runGraphNote: document.querySelector("#run-graph-note"),
+  runOrderToggle: document.querySelector("#run-order-toggle"),
+  runOrderLegend: document.querySelector("#run-order-legend"),
   runGraphScroll: document.querySelector("#run-graph-scroll"),
   runGraphCanvas: document.querySelector("#run-graph-canvas"),
   runGraphEdges: document.querySelector("#run-graph-edges"),
@@ -98,6 +100,7 @@ const state = {
   runGraphModel: null,
   runSelectedNodeId: null,
   runGraphFrame: null,
+  runOrderVisible: false,
 };
 
 const MODE_COPY = {
@@ -562,6 +565,7 @@ function resetRunState(runId, runKind = "create") {
   state.graphRefresh = null;
   state.runGraphModel = null;
   state.runSelectedNodeId = null;
+  state.runOrderVisible = false;
   clearActivity();
   updateTelemetry();
   updateControls();
@@ -674,6 +678,29 @@ function runStateTone(value) {
   return RUN_STATUS_ORDER.includes(value) ? value : "unknown";
 }
 
+function executionStateLabel(state) {
+  if (state === "succeeded") {
+    return "Execution completed";
+  }
+  return `Execution ${humanizeIdentifier(state).toLowerCase()}`;
+}
+
+function nodePresentation(node, state) {
+  if (!isCheckerNode(node)) {
+    return {label: executionStateLabel(state), tone: runStateTone(state), checker: false};
+  }
+  const result = nodeResult(node);
+  if (result.timed_out === true) {
+    return {label: "Validation timed out", tone: "failed", checker: true};
+  }
+  if (Number.isInteger(result.exit_code)) {
+    return result.exit_code === 0
+      ? {label: "Validation passed", tone: "succeeded", checker: true}
+      : {label: "Validation failed", tone: "failed", checker: true};
+  }
+  return {label: "Validation unavailable", tone: "unknown", checker: true};
+}
+
 function runStepLabel(node, nodeId) {
   if (isCheckerNode(node)) {
     return "Verify sketch";
@@ -692,6 +719,7 @@ function buildRunGraphModel(graph) {
   const events = Array.isArray(graph.events) ? graph.events.filter(isRecord) : [];
   const nodeEntries = Object.entries(isRecord(graph.nodes) ? graph.nodes : {});
   const sequenceByNode = new Map();
+  const startedSequenceByNode = new Map();
   let latestSequence = null;
 
   for (const event of events) {
@@ -706,18 +734,29 @@ function buildRunGraphModel(graph) {
     observed.first = Math.min(observed.first, sequence);
     observed.latest = Math.max(observed.latest, sequence);
     sequenceByNode.set(event.node_id, observed);
+    const kind = typeof event.kind === "string" ? event.kind.toLowerCase() : "";
+    if (kind === "task_started" && !startedSequenceByNode.has(event.node_id)) {
+      startedSequenceByNode.set(event.node_id, sequence);
+    }
   }
 
   const nodes = nodeEntries.map(([id, rawNode], insertion) => {
     const data = isRecord(rawNode) ? rawNode : {value: rawNode};
     const observed = sequenceByNode.get(id);
+    const nodeState = runStateValue(data);
     return {
       id,
       data,
       insertion,
       firstSequence: observed?.first ?? null,
       latestSequence: observed?.latest ?? null,
-      state: runStateValue(data),
+      startedSequence: startedSequenceByNode.get(id) ?? null,
+      state: nodeState,
+      executionLabel: executionStateLabel(nodeState),
+      presentation: nodePresentation(data, nodeState),
+      reportedIncoming: 0,
+      reportedOutgoing: 0,
+      isolated: false,
     };
   });
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -753,8 +792,14 @@ function buildRunGraphModel(graph) {
     incoming.set(edge.target, incoming.get(edge.target) + 1);
     outgoing.get(edge.source).push(edge.target);
   }
+  for (const node of nodes) {
+    node.reportedIncoming = incoming.get(node.id);
+    node.reportedOutgoing = outgoing.get(node.id).length;
+    node.isolated = node.reportedIncoming === 0 && node.reportedOutgoing === 0;
+  }
+  const remainingIncoming = new Map(incoming);
   const queue = nodes
-    .filter((node) => incoming.get(node.id) === 0)
+    .filter((node) => remainingIncoming.get(node.id) === 0)
     .sort(orderNodes)
     .map((node) => node.id);
   const processed = new Set();
@@ -764,8 +809,8 @@ function buildRunGraphModel(graph) {
     processed.add(nodeId);
     for (const target of outgoing.get(nodeId)) {
       depth.set(target, Math.max(depth.get(target), depth.get(nodeId) + 1));
-      incoming.set(target, incoming.get(target) - 1);
-      if (incoming.get(target) === 0) {
+      remainingIncoming.set(target, remainingIncoming.get(target) - 1);
+      if (remainingIncoming.get(target) === 0) {
         queue.push(target);
       }
     }
@@ -783,12 +828,47 @@ function buildRunGraphModel(graph) {
     statusCounts.set(node.state, (statusCounts.get(node.state) || 0) + 1);
   }
 
+  const reportedPairs = new Set(validEdges.map((edge) => `${edge.source}\u0000${edge.target}`));
+  const observedPairs = new Set();
+  const observedNextEdges = [];
+  const observedAdjacentById = new Map(nodes.map((node) => [node.id, new Set()]));
+  let lastTerminalNodeId = null;
+  const orderedEvents = events
+    .map((event, insertion) => ({event, insertion, sequence: graphSequence(event.sequence)}))
+    .filter((item) => item.sequence !== null)
+    .sort((left, right) => left.sequence - right.sequence || left.insertion - right.insertion);
+  for (const {event, sequence} of orderedEvents) {
+    const kind = typeof event.kind === "string" ? event.kind.toLowerCase() : "";
+    const nodeId = typeof event.node_id === "string" && nodeById.has(event.node_id)
+      ? event.node_id
+      : null;
+    if ((kind === "task_succeeded" || kind === "task_failed") && nodeId) {
+      lastTerminalNodeId = nodeId;
+      continue;
+    }
+    if (kind !== "task_started" || !nodeId) {
+      continue;
+    }
+    if (lastTerminalNodeId && lastTerminalNodeId !== nodeId) {
+      const pair = `${lastTerminalNodeId}\u0000${nodeId}`;
+      if (!reportedPairs.has(pair) && !observedPairs.has(pair)) {
+        observedPairs.add(pair);
+        observedNextEdges.push({source: lastTerminalNodeId, target: nodeId, sequence});
+        observedAdjacentById.get(lastTerminalNodeId).add(nodeId);
+        observedAdjacentById.get(nodeId).add(lastTerminalNodeId);
+      }
+    }
+    lastTerminalNodeId = null;
+  }
+
   return {
     graph,
     nodes,
     nodeById,
     orderedNodes,
     validEdges,
+    observedNextEdges,
+    observedAdjacentById,
     reportedEdgeCount: reportedEdges ? reportedEdges.length : null,
     malformedEdges,
     cycleNodeCount: cycleNodes.length,
@@ -885,10 +965,45 @@ function appendNodeFacts(parent, node) {
   facts.className = "node-facts";
   appendRunMetric(facts, "Node ID", node.id);
   appendRunMetric(facts, "Skill", typeof node.data.skill === "string" ? node.data.skill : null);
-  appendRunMetric(facts, "State", node.state === "unknown" ? null : humanizeIdentifier(node.state));
+  appendRunMetric(
+    facts,
+    "Execution state",
+    node.state === "unknown" ? null : humanizeIdentifier(node.state)
+  );
+  if (node.presentation.checker) {
+    appendRunMetric(
+      facts,
+      "Validation result",
+      humanizeIdentifier(node.presentation.label.replace("Validation ", ""))
+    );
+  }
+  appendRunMetric(
+    facts,
+    "Reported dependency",
+    node.isolated
+      ? "None"
+      : `${node.reportedIncoming} incoming · ${node.reportedOutgoing} outgoing`
+  );
+  appendRunMetric(facts, "Started at event", node.startedSequence);
   appendRunMetric(facts, "First sequence", node.firstSequence);
   appendRunMetric(facts, "Latest sequence", node.latestSequence);
   parent.append(facts);
+}
+
+function eventSequenceBadge(node) {
+  return node.startedSequence === null
+    ? null
+    : textElement("span", "run-event-badge", `Event ${node.startedSequence}`);
+}
+
+function appendStepPresentation(parent, node) {
+  const group = document.createElement("span");
+  group.className = "run-step-presentation";
+  group.append(textElement("span", "run-step-status", node.presentation.label));
+  if (node.presentation.checker) {
+    group.append(textElement("span", "run-execution-state", node.executionLabel));
+  }
+  parent.append(group);
 }
 
 function renderStepEvidence(container, node) {
@@ -926,7 +1041,7 @@ function renderRunOverview(model) {
 
   const counts = document.createElement("div");
   counts.className = "run-status-counts";
-  counts.append(textElement("span", "run-status-counts-label", "Node states"));
+  counts.append(textElement("span", "run-status-counts-label", "Runtime node states"));
   if (!model.nodes.length) {
     counts.append(textElement("span", "run-status-pill", "No nodes reported"));
   } else {
@@ -953,7 +1068,7 @@ function renderRunOverview(model) {
   model.orderedNodes.forEach((node, index) => {
     const details = document.createElement("details");
     details.className = "run-step";
-    details.dataset.state = runStateTone(node.state);
+    details.dataset.state = node.presentation.tone;
     const summaryRow = document.createElement("summary");
     summaryRow.className = "run-step-summary";
     summaryRow.append(textElement("span", "run-step-number", String(index + 1).padStart(2, "0")));
@@ -961,8 +1076,15 @@ function renderRunOverview(model) {
     identity.className = "run-step-identity";
     identity.append(textElement("strong", "", runStepLabel(node.data, node.id)));
     identity.append(textElement("code", "", node.id));
+    if (node.isolated) {
+      identity.append(textElement("span", "run-node-isolated", "No reported dependency"));
+    }
+    const sequenceBadge = eventSequenceBadge(node);
+    if (sequenceBadge) {
+      identity.append(sequenceBadge);
+    }
     summaryRow.append(identity);
-    summaryRow.append(textElement("span", "run-step-status", humanizeIdentifier(node.state)));
+    appendStepPresentation(summaryRow, node);
     details.append(summaryRow);
     const body = document.createElement("div");
     body.className = "run-step-body";
@@ -1008,10 +1130,211 @@ function selectRunGraphNode(nodeId, focus = false) {
     }
   }
   renderRunInspector(model.nodeById.get(nodeId));
+  if (state.runOrderVisible) {
+    scheduleRunGraphEdges();
+  }
 }
 
 function svgElement(name) {
   return document.createElementNS("http://www.w3.org/2000/svg", name);
+}
+
+function graphRect(element, canvasRect) {
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left - canvasRect.left,
+    top: rect.top - canvasRect.top,
+    right: rect.right - canvasRect.left,
+    bottom: rect.bottom - canvasRect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function expandGraphRect(rect, amount) {
+  return {
+    left: rect.left - amount,
+    top: rect.top - amount,
+    right: rect.right + amount,
+    bottom: rect.bottom + amount,
+  };
+}
+
+function pointInsideGraphRect(point, rect) {
+  return point.x > rect.left && point.x < rect.right
+    && point.y > rect.top && point.y < rect.bottom;
+}
+
+function segmentCrossesGraphRect(start, end, rect) {
+  if (start.x === end.x) {
+    const low = Math.min(start.y, end.y);
+    const high = Math.max(start.y, end.y);
+    return start.x > rect.left && start.x < rect.right
+      && Math.max(low, rect.top) < Math.min(high, rect.bottom);
+  }
+  const low = Math.min(start.x, end.x);
+  const high = Math.max(start.x, end.x);
+  return start.y > rect.top && start.y < rect.bottom
+    && Math.max(low, rect.left) < Math.min(high, rect.right);
+}
+
+function graphSegmentIsClear(start, end, obstacles) {
+  return obstacles.every((rect) => !segmentCrossesGraphRect(start, end, rect));
+}
+
+function simplifyGraphRoute(points) {
+  const simplified = [];
+  for (const point of points) {
+    const last = simplified.at(-1);
+    if (last && last.x === point.x && last.y === point.y) {
+      continue;
+    }
+    const previous = simplified.at(-2);
+    if (
+      previous
+      && ((previous.x === last.x && last.x === point.x)
+        || (previous.y === last.y && last.y === point.y))
+    ) {
+      simplified[simplified.length - 1] = point;
+    } else {
+      simplified.push(point);
+    }
+  }
+  return simplified;
+}
+
+function routeObservedEdge(sourceRect, targetRect, obstacles, width, height) {
+  const clearance = 8;
+  const travelsDown = targetRect.top + targetRect.height / 2
+    >= sourceRect.top + sourceRect.height / 2;
+  const sourceAnchor = {
+    x: sourceRect.left + sourceRect.width / 2,
+    y: travelsDown ? sourceRect.bottom : sourceRect.top,
+  };
+  const targetAnchor = {
+    x: targetRect.left + targetRect.width / 2,
+    y: travelsDown ? targetRect.top : targetRect.bottom,
+  };
+  const start = {
+    x: sourceAnchor.x,
+    y: sourceAnchor.y + (travelsDown ? clearance : -clearance),
+  };
+  const goal = {
+    x: targetAnchor.x,
+    y: targetAnchor.y + (travelsDown ? -clearance : clearance),
+  };
+  const xValues = new Set([6, width - 6, start.x, goal.x]);
+  const yValues = new Set([6, height - 6, start.y, goal.y]);
+  for (const rect of obstacles) {
+    xValues.add(Math.max(6, rect.left));
+    xValues.add(Math.min(width - 6, rect.right));
+    yValues.add(Math.max(6, rect.top));
+    yValues.add(Math.min(height - 6, rect.bottom));
+  }
+  const xs = [...xValues].sort((left, right) => left - right);
+  const ys = [...yValues].sort((left, right) => left - right);
+  const points = [];
+  const pointByCoordinate = new Map();
+  const coordinateKey = (x, y) => `${x}\u0000${y}`;
+  for (const y of ys) {
+    for (const x of xs) {
+      const point = {x, y};
+      if (obstacles.some((rect) => pointInsideGraphRect(point, rect))) {
+        continue;
+      }
+      const index = points.length;
+      points.push(point);
+      pointByCoordinate.set(coordinateKey(x, y), index);
+    }
+  }
+  const startIndex = pointByCoordinate.get(coordinateKey(start.x, start.y));
+  const goalIndex = pointByCoordinate.get(coordinateKey(goal.x, goal.y));
+  if (startIndex === undefined || goalIndex === undefined) {
+    return null;
+  }
+  const adjacency = new Map(points.map((_point, index) => [index, []]));
+  const connectVisibleNeighbors = (indexes) => {
+    indexes.sort((left, right) => {
+      const a = points[left];
+      const b = points[right];
+      return a.x - b.x || a.y - b.y;
+    });
+    for (let index = 1; index < indexes.length; index += 1) {
+      const previousIndex = indexes[index - 1];
+      const currentIndex = indexes[index];
+      if (!graphSegmentIsClear(points[previousIndex], points[currentIndex], obstacles)) {
+        continue;
+      }
+      adjacency.get(previousIndex).push(currentIndex);
+      adjacency.get(currentIndex).push(previousIndex);
+    }
+  };
+  for (const y of ys) {
+    connectVisibleNeighbors(
+      points.map((_point, index) => index).filter((index) => points[index].y === y)
+    );
+  }
+  for (const x of xs) {
+    const indexes = points.map((_point, index) => index).filter((index) => points[index].x === x);
+    indexes.sort((left, right) => points[left].y - points[right].y);
+    for (let index = 1; index < indexes.length; index += 1) {
+      const previousIndex = indexes[index - 1];
+      const currentIndex = indexes[index];
+      if (!graphSegmentIsClear(points[previousIndex], points[currentIndex], obstacles)) {
+        continue;
+      }
+      adjacency.get(previousIndex).push(currentIndex);
+      adjacency.get(currentIndex).push(previousIndex);
+    }
+  }
+
+  const startKey = `${startIndex}:none`;
+  const distances = new Map([[startKey, 0]]);
+  const previousByKey = new Map();
+  const queue = [{key: startKey, index: startIndex, direction: "none", cost: 0}];
+  let goalKey = null;
+  while (queue.length) {
+    queue.sort((left, right) => right.cost - left.cost);
+    const current = queue.pop();
+    if (current.cost !== distances.get(current.key)) {
+      continue;
+    }
+    if (current.index === goalIndex) {
+      goalKey = current.key;
+      break;
+    }
+    for (const neighborIndex of adjacency.get(current.index)) {
+      const currentPoint = points[current.index];
+      const neighbor = points[neighborIndex];
+      const direction = currentPoint.x === neighbor.x ? "vertical" : "horizontal";
+      const distance = Math.abs(currentPoint.x - neighbor.x) + Math.abs(currentPoint.y - neighbor.y);
+      const turnPenalty = current.direction !== "none" && current.direction !== direction ? 18 : 0;
+      const cost = current.cost + distance + turnPenalty;
+      const key = `${neighborIndex}:${direction}`;
+      if (cost >= (distances.get(key) ?? Number.POSITIVE_INFINITY)) {
+        continue;
+      }
+      distances.set(key, cost);
+      previousByKey.set(key, current.key);
+      queue.push({key, index: neighborIndex, direction, cost});
+    }
+  }
+  if (!goalKey) {
+    return null;
+  }
+  const route = [];
+  for (let key = goalKey; key; key = previousByKey.get(key)) {
+    route.push(points[Number.parseInt(key.split(":", 1)[0], 10)]);
+  }
+  route.reverse();
+  return simplifyGraphRoute([sourceAnchor, ...route, targetAnchor]);
+}
+
+function graphRoutePath(points) {
+  const coordinate = (value) => Math.round(value * 10) / 10;
+  return points.map((point, index) => (
+    `${index === 0 ? "M" : "L"} ${coordinate(point.x)} ${coordinate(point.y)}`
+  )).join(" ");
 }
 
 function drawRunGraphEdges() {
@@ -1029,45 +1352,83 @@ function drawRunGraphEdges() {
   elements.runGraphEdges.setAttribute("height", String(height));
 
   const definitions = svgElement("defs");
-  const marker = svgElement("marker");
-  marker.setAttribute("id", "run-graph-arrow");
-  marker.setAttribute("markerWidth", "8");
-  marker.setAttribute("markerHeight", "8");
-  marker.setAttribute("refX", "7");
-  marker.setAttribute("refY", "4");
-  marker.setAttribute("orient", "auto");
-  const arrow = svgElement("path");
-  arrow.setAttribute("d", "M0,0 L8,4 L0,8 Z");
-  marker.append(arrow);
-  definitions.append(marker);
+  for (const kind of ["reported", "observed"]) {
+    const marker = svgElement("marker");
+    marker.setAttribute("id", `run-graph-arrow-${kind}`);
+    marker.setAttribute("markerWidth", "8");
+    marker.setAttribute("markerHeight", "8");
+    marker.setAttribute("refX", "7");
+    marker.setAttribute("refY", "4");
+    marker.setAttribute("orient", "auto");
+    marker.dataset.edgeKind = kind;
+    const arrow = svgElement("path");
+    arrow.setAttribute("d", "M0,0 L8,4 L0,8 Z");
+    marker.append(arrow);
+    definitions.append(marker);
+  }
   elements.runGraphEdges.append(definitions);
 
   const buttonById = new Map(
     [...elements.runGraphNodes.querySelectorAll(".run-graph-node")]
       .map((button) => [button.dataset.nodeId, button])
   );
-  for (const edge of model.validEdges) {
+  const rectById = new Map(
+    [...buttonById].map(([nodeId, button]) => [nodeId, graphRect(button, canvasRect)])
+  );
+  const observedObstacles = [...rectById.values()].map((rect) => expandGraphRect(rect, 6));
+  const drawEdge = (edge, kind) => {
     const source = buttonById.get(edge.source);
     const target = buttonById.get(edge.target);
     if (!source || !target) {
-      continue;
+      return;
     }
     const sourceRect = source.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
-    const sourceX = sourceRect.right - canvasRect.left;
-    const sourceY = sourceRect.top - canvasRect.top + sourceRect.height / 2;
-    const targetX = targetRect.left - canvasRect.left;
-    const targetY = targetRect.top - canvasRect.top + targetRect.height / 2;
-    const span = Math.max(44, Math.abs(targetX - sourceX) / 2);
     const path = svgElement("path");
-    path.setAttribute(
-      "d",
-      `M ${sourceX} ${sourceY} C ${sourceX + span} ${sourceY}, ${targetX - span} ${targetY}, ${targetX} ${targetY}`
-    );
-    path.setAttribute("marker-end", "url(#run-graph-arrow)");
+    if (kind === "observed") {
+      const route = routeObservedEdge(
+        rectById.get(edge.source),
+        rectById.get(edge.target),
+        observedObstacles,
+        width,
+        height
+      );
+      if (!route) {
+        return;
+      }
+      path.setAttribute("d", graphRoutePath(route));
+      path.dataset.routeClear = "true";
+    } else {
+      const sourceX = sourceRect.right - canvasRect.left;
+      const sourceY = sourceRect.top - canvasRect.top + sourceRect.height / 2;
+      const targetX = targetRect.left - canvasRect.left;
+      const targetY = targetRect.top - canvasRect.top + targetRect.height / 2;
+      const span = Math.max(44, Math.abs(targetX - sourceX) / 2);
+      path.setAttribute(
+        "d",
+        `M ${sourceX} ${sourceY} C ${sourceX + span} ${sourceY}, ${targetX - span} ${targetY}, ${targetX} ${targetY}`
+      );
+    }
+    path.classList.add("run-graph-edge", `run-graph-edge-${kind}`);
+    path.setAttribute("marker-end", `url(#run-graph-arrow-${kind})`);
     path.dataset.source = edge.source;
     path.dataset.target = edge.target;
+    path.dataset.edgeKind = kind;
+    if (kind === "observed") {
+      const selected = state.runSelectedNodeId;
+      path.dataset.emphasis = edge.source === selected || edge.target === selected
+        ? "active"
+        : "muted";
+    }
     elements.runGraphEdges.append(path);
+  };
+  for (const edge of model.validEdges) {
+    drawEdge(edge, "reported");
+  }
+  if (state.runOrderVisible) {
+    for (const edge of model.observedNextEdges) {
+      drawEdge(edge, "observed");
+    }
   }
 }
 
@@ -1080,18 +1441,33 @@ function scheduleRunGraphEdges() {
   });
 }
 
+function renderRunGraphNote(model) {
+  const notes = [state.runOrderVisible
+    ? "Run order shows which task started next; it is not a dependency. Node position is arranged only for readability."
+    : "Lines show reported dependencies. Node position is arranged only for readability."];
+  if (model?.malformedEdges) {
+    notes.push(`${model.malformedEdges} malformed ${model.malformedEdges === 1 ? "edge was" : "edges were"} not drawn.`);
+  }
+  if (model?.cycleNodeCount) {
+    notes.push(`${model.cycleNodeCount} ${model.cycleNodeCount === 1 ? "node is" : "nodes are"} shown in an unresolved dependency group.`);
+  }
+  elements.runGraphNote.textContent = notes.join(" ");
+}
+
+function setRunOrderVisible(visible) {
+  state.runOrderVisible = visible === true;
+  elements.runOrderToggle.checked = state.runOrderVisible;
+  elements.runOrderLegend.hidden = !state.runOrderVisible;
+  elements.runGraphCanvas.dataset.runOrderVisible = state.runOrderVisible ? "true" : "false";
+  renderRunGraphNote(state.runGraphModel);
+  scheduleRunGraphEdges();
+}
+
 function renderRunGraph(model) {
   clearElement(elements.runGraphNodes);
   clearElement(elements.runGraphEdges);
   state.runGraphModel = model;
-  const notes = ["Connectors reflect edges reported by S17. Node position is arranged only for readability."];
-  if (model.malformedEdges) {
-    notes.push(`${model.malformedEdges} malformed ${model.malformedEdges === 1 ? "edge was" : "edges were"} not drawn.`);
-  }
-  if (model.cycleNodeCount) {
-    notes.push(`${model.cycleNodeCount} ${model.cycleNodeCount === 1 ? "node is" : "nodes are"} shown in an unresolved dependency group.`);
-  }
-  elements.runGraphNote.textContent = notes.join(" ");
+  renderRunGraphNote(model);
   if (!model.nodes.length) {
     elements.runGraphNodes.append(textElement("p", "empty-evidence", "No run nodes were reported."));
     state.runSelectedNodeId = null;
@@ -1117,10 +1493,29 @@ function renderRunGraph(model) {
       button.className = "run-graph-node";
       button.type = "button";
       button.dataset.nodeId = node.id;
-      button.dataset.state = runStateTone(node.state);
+      button.dataset.state = node.presentation.tone;
       button.setAttribute("aria-pressed", "false");
-      button.setAttribute("aria-label", `${runStepLabel(node.data, node.id)}, ${humanizeIdentifier(node.state)}, ${node.id}`);
-      button.append(textElement("span", "run-graph-node-state", humanizeIdentifier(node.state)));
+      const isolationLabel = node.isolated ? ", no reported dependency" : "";
+      const executionLabel = node.presentation.checker ? `, ${node.executionLabel}` : "";
+      const eventLabel = node.startedSequence === null ? "" : `, event ${node.startedSequence}`;
+      button.setAttribute(
+        "aria-label",
+        `${runStepLabel(node.data, node.id)}, ${node.presentation.label}${executionLabel}${eventLabel}${isolationLabel}, ${node.id}`
+      );
+      const badges = document.createElement("span");
+      badges.className = "run-graph-node-badges";
+      badges.append(textElement("span", "run-graph-node-state", node.presentation.label));
+      if (node.presentation.checker) {
+        badges.append(textElement("span", "run-execution-state", node.executionLabel));
+      }
+      const sequenceBadge = eventSequenceBadge(node);
+      if (sequenceBadge) {
+        badges.append(sequenceBadge);
+      }
+      if (node.isolated) {
+        badges.append(textElement("span", "run-node-isolated", "No reported dependency"));
+      }
+      button.append(badges);
       button.append(textElement("strong", "", runStepLabel(node.data, node.id)));
       button.append(textElement("code", "", node.id));
       button.addEventListener("click", () => selectRunGraphNode(node.id));
@@ -1508,6 +1903,7 @@ async function openCodeDialog() {
 async function openRunDialog() {
   elements.runMeta.textContent = state.runId ? `Run ${state.runId}` : "No run selected";
   state.runSelectedNodeId = null;
+  setRunOrderVisible(false);
   setRunTab("overview");
   renderRunEvidenceMessage(state.runId ? "Loading run evidence…" : "No run is selected.");
   elements.runDialog.showModal();
@@ -1613,6 +2009,9 @@ elements.followUpPrompt.addEventListener("input", updateFollowUpCount);
 elements.viewCode.addEventListener("click", openCodeDialog);
 elements.viewRun.addEventListener("click", openRunDialog);
 elements.reset.addEventListener("click", resetSession);
+elements.runOrderToggle.addEventListener("change", () => {
+  setRunOrderVisible(elements.runOrderToggle.checked);
+});
 for (const tab of elements.runTabs) {
   tab.addEventListener("click", () => setRunTab(tab.dataset.runTab));
   tab.addEventListener("keydown", (event) => {

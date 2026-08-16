@@ -288,9 +288,33 @@
         tabindex="0"
         hidden
       >
-        <p class="run-graph-note" id="run-graph-note">
-          Connectors reflect edges reported by S17. Node position is arranged only for readability.
-        </p>
+        <div class="run-graph-context">
+          <div class="run-graph-toolbar">
+            <div class="run-graph-legend" id="run-graph-legend" aria-label="Graph connector legend">
+              <span class="run-graph-legend-item">
+                <span class="run-graph-legend-line" data-edge-kind="reported" aria-hidden="true"></span>
+                <span>Dependency</span>
+              </span>
+              <span class="run-graph-legend-item" id="run-order-legend" hidden>
+                <span class="run-graph-legend-line" data-edge-kind="observed" aria-hidden="true"></span>
+                <span>Run order</span>
+              </span>
+            </div>
+            <label class="run-order-toggle" for="run-order-toggle">
+              <input
+                id="run-order-toggle"
+                type="checkbox"
+                role="switch"
+                aria-describedby="run-graph-note"
+              >
+              <span class="run-order-toggle-track" aria-hidden="true"></span>
+              <span>Show run order</span>
+            </label>
+          </div>
+          <p class="run-graph-note" id="run-graph-note">
+            Lines show reported dependencies. Node position is arranged only for readability.
+          </p>
+        </div>
         <div class="run-graph-layout">
           <div class="run-graph-scroll" id="run-graph-scroll" tabindex="0" aria-label="Run graph canvas">
             <div class="run-graph-canvas" id="run-graph-canvas">
