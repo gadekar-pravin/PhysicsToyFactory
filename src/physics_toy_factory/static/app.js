@@ -77,6 +77,7 @@ const elements = {
   historySearch: document.querySelector("#history-search"),
   historyQuery: document.querySelector("#history-query"),
   historyStatus: document.querySelector("#history-status"),
+  historyBrowser: document.querySelector(".history-browser"),
   historyList: document.querySelector("#history-list"),
   historyMore: document.querySelector("#history-more"),
   historyDetail: document.querySelector("#history-detail"),
@@ -118,6 +119,7 @@ const state = {
   historyPreviewId: null,
   historyPreviewWatchdog: null,
   historyPreviewTerminal: false,
+  historyChildReturn: null,
 };
 
 const MODE_COPY = {
@@ -649,12 +651,57 @@ function appendHistoryFact(parent, label, value) {
   parent.append(fact);
 }
 
-function openHistoricalEvidence(detail) {
+function prepareHistoryChildReturn(child, trigger, statusText = elements.historyStatus.textContent) {
+  state.historyChildReturn = {
+    child,
+    selectedId: state.historySelectedId,
+    listScrollTop: elements.historyBrowser.scrollTop,
+    detailScrollTop: elements.historyDetail.scrollTop,
+    statusText,
+    trigger: trigger instanceof HTMLElement ? trigger : null,
+  };
+  elements.historyDialog.close();
+}
+
+function resetHistoryPreviewPlaceholder() {
+  const message = elements.historyDetail.querySelector(".history-preview-message");
+  if (!message) {
+    return;
+  }
+  message.textContent = "Select Preview to open the saved verified simulation.";
+  message.hidden = false;
+}
+
+function historyItemForId(historyId) {
+  return Array.from(elements.historyList.querySelectorAll("[data-history-id]"))
+    .find((item) => item.dataset.historyId === historyId) || null;
+}
+
+function restoreHistoryAfterChild(child) {
+  const context = state.historyChildReturn;
+  if (!context || context.child !== child) {
+    return;
+  }
+  state.historyChildReturn = null;
+  resetHistoryPreviewPlaceholder();
+  elements.historyStatus.textContent = context.statusText;
+  elements.historyDialog.showModal();
+  window.requestAnimationFrame(() => {
+    const focusTarget = context.trigger?.isConnected
+      ? context.trigger
+      : historyItemForId(context.selectedId);
+    focusTarget?.focus({preventScroll: true});
+    elements.historyBrowser.scrollTop = context.listScrollTop;
+    elements.historyDetail.scrollTop = context.detailScrollTop;
+  });
+}
+
+function openHistoricalEvidence(detail, trigger) {
   const graph = detail?.graph;
   if (!graph || typeof graph !== "object") {
     return;
   }
-  elements.historyDialog.close();
+  prepareHistoryChildReturn("run", trigger);
   state.runSelectedNodeId = null;
   setRunOrderVisible(false);
   setRunTab("overview");
@@ -662,11 +709,12 @@ function openHistoricalEvidence(detail) {
   elements.runDialog.showModal();
 }
 
-async function openHistoricalCode(historyId) {
+async function openHistoricalCode(historyId, trigger) {
+  const historyStatusText = elements.historyStatus.textContent;
   elements.historyStatus.textContent = "Loading archived sketch.js…";
   try {
     const code = await requestJson(`/api/history/${encodeURIComponent(historyId)}/code`);
-    elements.historyDialog.close();
+    prepareHistoryChildReturn("code", trigger, historyStatusText);
     elements.codeMeta.textContent = `${code.bytes} bytes · sha256 ${code.sha256} · saved verified revision`;
     elements.codeContent.textContent = code.content;
     elements.codeDialog.showModal();
@@ -833,11 +881,11 @@ function renderHistoryDetail(detail) {
   const evidence = textElement("button", "button button-quiet", "View evidence");
   evidence.type = "button";
   evidence.disabled = !detail.graph;
-  evidence.addEventListener("click", () => openHistoricalEvidence(detail));
+  evidence.addEventListener("click", () => openHistoricalEvidence(detail, evidence));
   const code = textElement("button", "button button-quiet", "View code");
   code.type = "button";
   code.disabled = item.preview_available !== true;
-  code.addEventListener("click", () => openHistoricalCode(item.history_id));
+  code.addEventListener("click", () => openHistoricalCode(item.history_id, code));
   const remove = textElement("button", "button button-quiet history-delete", "Delete");
   remove.type = "button";
   const current = currentSessionOwnsRun(item.run_id);
@@ -893,6 +941,7 @@ async function selectHistoryRun(historyId) {
 }
 
 async function openHistoryDialog() {
+  state.historyChildReturn = null;
   elements.historyQuery.value = "";
   elements.historyDialog.showModal();
   await loadHistory(true);
@@ -2318,6 +2367,7 @@ async function startFollowUp(event) {
 }
 
 async function openCodeDialog() {
+  state.historyChildReturn = null;
   elements.codeMeta.textContent = "Loading the fixed sketch.js path…";
   elements.codeContent.textContent = "";
   elements.codeDialog.showModal();
@@ -2332,6 +2382,7 @@ async function openCodeDialog() {
 }
 
 async function openRunDialog() {
+  state.historyChildReturn = null;
   elements.runMeta.textContent = state.runId ? `Run ${state.runId}` : "No run selected";
   state.runSelectedNodeId = null;
   setRunOrderVisible(false);
@@ -2450,6 +2501,8 @@ elements.historyMore.addEventListener("click", () => {
   void loadHistory(false);
 });
 elements.historyDialog.addEventListener("close", destroyHistoryPreview);
+elements.codeDialog.addEventListener("close", () => restoreHistoryAfterChild("code"));
+elements.runDialog.addEventListener("close", () => restoreHistoryAfterChild("run"));
 elements.runOrderToggle.addEventListener("change", () => {
   setRunOrderVisible(elements.runOrderToggle.checked);
 });

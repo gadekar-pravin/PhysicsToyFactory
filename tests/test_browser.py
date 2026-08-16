@@ -235,11 +235,14 @@ async def test_recorded_red_green_activity_and_safe_dialogs(
     await expect(browser_page.locator("#code-content")).to_contain_text("code-attack")
     assert await browser_page.locator("#code-dialog img").count() == 0
     await browser_page.get_by_role("button", name="Close code dialog").click()
+    await expect(browser_page.locator("#history-dialog")).to_be_hidden()
 
     await browser_page.locator("#view-run").click()
     await expect(browser_page.locator("#run-dialog")).to_be_visible()
     await expect(browser_page.locator("#run-content")).to_contain_text("run-attack")
     assert await browser_page.locator("#run-dialog img").count() == 0
+    await browser_page.get_by_role("button", name="Close run dialog").click()
+    await expect(browser_page.locator("#history-dialog")).to_be_hidden()
 
 
 @pytest.mark.browser
@@ -285,22 +288,68 @@ async def test_saved_run_library_reopens_evidence_code_preview_and_deletes_safel
     assert session_before["session"]["state"] == "ready"
     assert session_before["session"]["follow_up_used"] is False
 
-    await browser_page.get_by_role("button", name="View evidence").click()
-    await expect(history).to_be_hidden()
-    await expect(browser_page.locator("#run-dialog")).to_be_visible()
-    await expect(browser_page.locator("#run-content")).to_contain_text("run-attack")
-    assert await browser_page.locator("#run-dialog img").count() == 0
-    await browser_page.get_by_role("button", name="Close run dialog").click()
+    await browser_page.set_viewport_size({"width": 1200, "height": 700})
+    await history.locator("#history-query").fill("orbit")
+    history_status_before = await history.locator("#history-status").text_content()
 
-    await browser_page.locator("#saved-runs").click()
-    await expect(history).to_be_visible()
-    await history.get_by_role("button", name="View code").click()
-    await expect(history).to_be_hidden()
-    await expect(browser_page.locator("#code-dialog")).to_be_visible()
-    await expect(browser_page.locator("#code-content")).to_contain_text("code-attack")
-    assert await browser_page.locator("#code-dialog img").count() == 0
-    await browser_page.get_by_role("button", name="Close code dialog").click()
+    async def assert_history_restored(button_name: str, scroll_before: dict) -> None:
+        await expect(history).to_be_visible()
+        await expect(history.locator("#history-query")).to_have_value("orbit")
+        await expect(history.locator("#history-status")).to_have_text(history_status_before)
+        await expect(history.locator('.history-item[aria-current="true"]')).to_have_count(1)
+        await expect(history.get_by_role("button", name=button_name)).to_be_focused()
+        await expect(browser_page.locator(".history-preview iframe")).to_have_count(0)
+        await expect(browser_page.locator(".history-preview-message")).to_be_visible()
+        scroll_after = await history.evaluate(
+            """dialog => ({
+              list: dialog.querySelector('.history-browser').scrollTop,
+              detail: dialog.querySelector('.history-detail').scrollTop,
+            })"""
+        )
+        assert scroll_after == scroll_before
 
+    async def close_historical_child(kind: str, close_method: str) -> None:
+        button_name = "View evidence" if kind == "run" else "View code"
+        dialog = browser_page.locator("#run-dialog" if kind == "run" else "#code-dialog")
+        trigger = history.get_by_role("button", name=button_name)
+        await trigger.focus()
+        await expect(trigger).to_be_focused()
+        scroll_before = await history.evaluate(
+            """dialog => ({
+              list: dialog.querySelector('.history-browser').scrollTop,
+              detail: dialog.querySelector('.history-detail').scrollTop,
+            })"""
+        )
+        await trigger.evaluate("element => element.click()")
+        await expect(history).to_be_hidden()
+        await expect(dialog).to_be_visible()
+        if kind == "run":
+            await expect(browser_page.locator("#run-content")).to_contain_text("run-attack")
+        else:
+            await expect(browser_page.locator("#code-content")).to_contain_text("code-attack")
+        assert await dialog.locator("img").count() == 0
+        if close_method == "button":
+            close_name = "Close run dialog" if kind == "run" else "Close code dialog"
+            await browser_page.get_by_role("button", name=close_name).click()
+        elif close_method == "escape":
+            await browser_page.keyboard.press("Escape")
+        else:
+            await dialog.evaluate("element => element.click()")
+        await expect(dialog).to_be_hidden()
+        await assert_history_restored(button_name, scroll_before)
+
+    for close_method in ("button", "escape", "backdrop"):
+        await close_historical_child("run", close_method)
+    for close_method in ("button", "escape", "backdrop"):
+        await close_historical_child("code", close_method)
+
+    session_after_child_views = await browser_page.evaluate(
+        "fetch('/api/session').then(response => response.json())"
+    )
+    assert session_after_child_views["session"]["state"] == "ready"
+    assert session_after_child_views["session"]["follow_up_used"] is False
+
+    await browser_page.get_by_role("button", name="Close saved runs").click()
     await browser_page.locator("#reset-session").click()
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "landing")
     await browser_page.locator("#saved-runs").click()
