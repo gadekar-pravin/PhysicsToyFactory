@@ -175,6 +175,12 @@ async def test_recorded_red_green_activity_and_safe_dialogs(
     complete_recorded_run(fake_s17, settings, recorded_graph)
     await browser_page.goto(live_product)
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "landing")
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Locked")
+    await expect(browser_page.locator("#telemetry-revision")).to_have_text("—")
+    await expect(browser_page.locator("#telemetry-run")).to_have_text("—")
+    await expect(browser_page.locator("#telemetry-sequence")).to_have_text("—")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Idle")
+    await expect(browser_page.locator("#header-run-status")).to_be_hidden()
 
     suggestion = browser_page.get_by_role("button", name="Rain that avoids my mouse")
     await suggestion.click()
@@ -202,6 +208,16 @@ async def test_recorded_red_green_activity_and_safe_dialogs(
     assert "P5CHECK FAIL" in visible
     await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
         "data-preview-state", "ready"
+    )
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Active")
+    await expect(browser_page.locator("#telemetry-revision")).to_have_text(
+        re.compile(r"^[0-9a-f]{10}…$")
+    )
+    await expect(browser_page.locator("#telemetry-run")).to_have_text("run-fake-1")
+    await expect(browser_page.locator("#telemetry-sequence")).to_have_text("13")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Passed")
+    await expect(browser_page.locator("#header-run-status")).to_have_text(
+        "RUN run-fake-1 · SEQ 13"
     )
     assert await browser_page.locator("iframe").count() == 1
 
@@ -238,7 +254,7 @@ async def test_reconnect_snapshot_and_replayed_sequence_add_no_rows(
 ) -> None:
     def reconnecting_stream(run_id: str, graph: dict) -> None:
         initial = {**graph, "finished": False, "events": graph["events"][:6]}
-        fake_s17.streams[run_id] = b"retry: 25\n" + sse_for_graph(
+        fake_s17.streams[run_id] = b"retry: 250\n" + sse_for_graph(
             initial, include_terminal=False
         )
         snapshot = {
@@ -264,7 +280,13 @@ async def test_reconnect_snapshot_and_replayed_sequence_add_no_rows(
     await browser_page.goto(live_product)
     await browser_page.locator("#prompt").fill("Bouncy magnets")
     await browser_page.locator("#create-button").click()
+    await expect(browser_page.locator("#app")).to_have_attribute(
+        "data-state", "reconnecting"
+    )
+    await expect(browser_page.locator("#telemetry-sequence")).to_have_text("6")
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "ready")
+    await expect(browser_page.locator("#telemetry-sequence")).to_have_text("13")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Passed")
 
     provenance = await browser_page.locator(".activity-item").evaluate_all(
         "items => items.map(item => item.dataset.sequence)"
@@ -291,6 +313,9 @@ async def test_degraded_health_is_explicit_and_disables_creation(
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "degraded")
     await expect(browser_page.locator("#system-banner")).to_be_visible()
     await expect(browser_page.locator("#create-button")).to_be_disabled()
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Locked")
+    await expect(browser_page.locator("#telemetry-run")).to_have_text("—")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Idle")
 
 
 @pytest.mark.browser
@@ -331,6 +356,10 @@ async def test_terminal_run_failure_is_honest_and_safely_rendered(
     await expect(activity).to_contain_text("Run failed")
     await expect(activity).to_contain_text("Run incomplete")
     await expect(activity).to_contain_text("failure-attack")
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Locked")
+    await expect(browser_page.locator("#telemetry-run")).to_have_text("run-fake-1")
+    await expect(browser_page.locator("#telemetry-sequence")).to_have_text("3")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Idle")
     assert await activity.locator("img").count() == 0
 
 
@@ -407,6 +436,8 @@ async def test_verified_preview_cage_is_interactive_and_rejects_hostile_capabili
     await frame.evaluate(trigger)
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "failed")
     await expect(stage).to_have_attribute("data-preview-state", "error")
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Stopped")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Stopped")
     await expect(browser_page.locator("#stage-description")).to_contain_text(expected_text)
     assert await browser_page.locator("#simulation-stage img").count() == 0
     assert await browser_page.locator("#preview-host iframe").count() == 0
@@ -452,6 +483,8 @@ async def test_preview_watchdog_destroys_unresponsive_frame_and_records_failure(
     await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
         "data-preview-state", "timeout"
     )
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Stopped")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Stopped")
     await expect(browser_page.locator("#stage-description")).to_have_text(
         "Preview did not become responsive."
     )
@@ -496,6 +529,10 @@ async def test_one_linked_follow_up_replaces_preview_after_read_edit_check(
     await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
         "data-preview-state", "ready"
     )
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Active")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Passed")
+    initial_revision = await browser_page.locator("#telemetry-revision").text_content()
+    assert initial_revision is not None and re.fullmatch(r"[0-9a-f]{10}…", initial_revision)
     await expect(browser_page.locator("#follow-up-panel")).to_be_visible()
     initial_frame_element = browser_page.locator("#preview-host iframe")
     initial_src = await initial_frame_element.get_attribute("src")
@@ -523,12 +560,23 @@ async def test_one_linked_follow_up_replaces_preview_after_read_edit_check(
     await expect(browser_page.locator("#follow-up-button")).to_be_disabled()
     await expect(browser_page.locator("#follow-up-panel")).to_be_hidden()
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "modifying")
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Locked")
+    await expect(browser_page.locator("#telemetry-revision")).to_have_text(initial_revision)
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Idle")
     release_request.set()
 
     await expect(browser_page.locator("#app")).to_have_attribute("data-state", "ready")
     await expect(browser_page.locator("#simulation-stage")).to_have_attribute(
         "data-preview-state", "ready"
     )
+    await expect(browser_page.locator("#telemetry-cage")).to_have_text("Active")
+    await expect(browser_page.locator("#telemetry-revision")).to_have_text(
+        re.compile(r"^[0-9a-f]{10}…$")
+    )
+    await expect(browser_page.locator("#telemetry-run")).to_have_text("run-fake-2")
+    await expect(browser_page.locator("#telemetry-watchdog")).to_have_text("Passed")
+    modified_revision = await browser_page.locator("#telemetry-revision").text_content()
+    assert modified_revision is not None and modified_revision != initial_revision
     await expect(browser_page.locator("#follow-up-panel")).to_be_hidden()
     row_text = "\n".join(await browser_page.locator(".activity-item").all_text_contents())
     for expected in (
