@@ -2,6 +2,15 @@
 
 const MAX_DETAIL_CHARS = 240;
 const GRAPH_DEBOUNCE_MS = 60;
+const RUN_SKILL_LABELS = {
+  answer_with_evidence: "Final answer",
+  create_file: "Write file",
+  edit_code: "Edit code",
+  glob_files: "Find files",
+  read_code: "Read file",
+  run_command: "Run command",
+};
+const RUN_STATUS_ORDER = ["running", "pending", "succeeded", "failed", "cancelled", "blocked", "unknown"];
 
 const elements = {
   app: document.querySelector("#app"),
@@ -46,6 +55,19 @@ const elements = {
   codeContent: document.querySelector("#code-content"),
   runDialog: document.querySelector("#run-dialog"),
   runMeta: document.querySelector("#run-meta"),
+  runTabs: Array.from(document.querySelectorAll("[data-run-tab]")),
+  runPanels: {
+    overview: document.querySelector("#run-panel-overview"),
+    graph: document.querySelector("#run-panel-graph"),
+    raw: document.querySelector("#run-panel-raw"),
+  },
+  runOverview: document.querySelector("#run-overview"),
+  runGraphNote: document.querySelector("#run-graph-note"),
+  runGraphScroll: document.querySelector("#run-graph-scroll"),
+  runGraphCanvas: document.querySelector("#run-graph-canvas"),
+  runGraphEdges: document.querySelector("#run-graph-edges"),
+  runGraphNodes: document.querySelector("#run-graph-nodes"),
+  runInspector: document.querySelector("#run-inspector"),
   runContent: document.querySelector("#run-content"),
 };
 
@@ -72,6 +94,10 @@ const state = {
   previewTerminal: false,
   runKind: null,
   followUpSubmitting: false,
+  runActiveTab: "overview",
+  runGraphModel: null,
+  runSelectedNodeId: null,
+  runGraphFrame: null,
 };
 
 const MODE_COPY = {
@@ -534,6 +560,8 @@ function resetRunState(runId, runKind = "create") {
   }
   state.graphTimer = null;
   state.graphRefresh = null;
+  state.runGraphModel = null;
+  state.runSelectedNodeId = null;
   clearActivity();
   updateTelemetry();
   updateControls();
@@ -607,6 +635,549 @@ function isCheckerNode(node) {
   const command = nodeInput(node).command;
   return typeof command === "string"
     && /^node\s+(?:\.\/)?p5check\.js\s+(?:\.\/)?sketch\.js$/.test(command.trim());
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function clearElement(element) {
+  while (element.firstChild) {
+    element.firstChild.remove();
+  }
+}
+
+function textElement(tagName, className, value) {
+  const element = document.createElement(tagName);
+  if (className) {
+    element.className = className;
+  }
+  element.textContent = value;
+  return element;
+}
+
+function humanizeIdentifier(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "Unknown step";
+  }
+  const normalized = value.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function runStateValue(node) {
+  return typeof node?.state === "string" && node.state.trim()
+    ? node.state.trim().toLowerCase()
+    : "unknown";
+}
+
+function runStateTone(value) {
+  return RUN_STATUS_ORDER.includes(value) ? value : "unknown";
+}
+
+function runStepLabel(node, nodeId) {
+  if (isCheckerNode(node)) {
+    return "Verify sketch";
+  }
+  if (typeof node?.skill === "string" && RUN_SKILL_LABELS[node.skill]) {
+    return RUN_SKILL_LABELS[node.skill];
+  }
+  return humanizeIdentifier(node?.skill || nodeId);
+}
+
+function graphSequence(value) {
+  return Number.isInteger(value) ? value : null;
+}
+
+function buildRunGraphModel(graph) {
+  const events = Array.isArray(graph.events) ? graph.events.filter(isRecord) : [];
+  const nodeEntries = Object.entries(isRecord(graph.nodes) ? graph.nodes : {});
+  const sequenceByNode = new Map();
+  let latestSequence = null;
+
+  for (const event of events) {
+    const sequence = graphSequence(event.sequence);
+    if (sequence !== null) {
+      latestSequence = latestSequence === null ? sequence : Math.max(latestSequence, sequence);
+    }
+    if (sequence === null || typeof event.node_id !== "string") {
+      continue;
+    }
+    const observed = sequenceByNode.get(event.node_id) || {first: sequence, latest: sequence};
+    observed.first = Math.min(observed.first, sequence);
+    observed.latest = Math.max(observed.latest, sequence);
+    sequenceByNode.set(event.node_id, observed);
+  }
+
+  const nodes = nodeEntries.map(([id, rawNode], insertion) => {
+    const data = isRecord(rawNode) ? rawNode : {value: rawNode};
+    const observed = sequenceByNode.get(id);
+    return {
+      id,
+      data,
+      insertion,
+      firstSequence: observed?.first ?? null,
+      latestSequence: observed?.latest ?? null,
+      state: runStateValue(data),
+    };
+  });
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const reportedEdges = Array.isArray(graph.edges) ? graph.edges : null;
+  const validEdges = [];
+  let malformedEdges = 0;
+  for (const edge of reportedEdges || []) {
+    if (
+      Array.isArray(edge)
+      && edge.length === 2
+      && typeof edge[0] === "string"
+      && typeof edge[1] === "string"
+      && nodeById.has(edge[0])
+      && nodeById.has(edge[1])
+    ) {
+      validEdges.push({source: edge[0], target: edge[1]});
+    } else {
+      malformedEdges += 1;
+    }
+  }
+
+  const orderNodes = (left, right) => {
+    const leftSequence = left.firstSequence ?? Number.POSITIVE_INFINITY;
+    const rightSequence = right.firstSequence ?? Number.POSITIVE_INFINITY;
+    return leftSequence - rightSequence || left.insertion - right.insertion;
+  };
+  const orderedNodes = [...nodes].sort(orderNodes);
+  const rankById = new Map(orderedNodes.map((node, index) => [node.id, index]));
+  const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(nodes.map((node) => [node.id, []]));
+  const depth = new Map(nodes.map((node) => [node.id, 0]));
+  for (const edge of validEdges) {
+    incoming.set(edge.target, incoming.get(edge.target) + 1);
+    outgoing.get(edge.source).push(edge.target);
+  }
+  const queue = nodes
+    .filter((node) => incoming.get(node.id) === 0)
+    .sort(orderNodes)
+    .map((node) => node.id);
+  const processed = new Set();
+  while (queue.length) {
+    queue.sort((left, right) => rankById.get(left) - rankById.get(right));
+    const nodeId = queue.shift();
+    processed.add(nodeId);
+    for (const target of outgoing.get(nodeId)) {
+      depth.set(target, Math.max(depth.get(target), depth.get(nodeId) + 1));
+      incoming.set(target, incoming.get(target) - 1);
+      if (incoming.get(target) === 0) {
+        queue.push(target);
+      }
+    }
+  }
+  const cycleNodes = nodes.filter((node) => !processed.has(node.id));
+  if (cycleNodes.length) {
+    const fallbackDepth = Math.max(0, ...depth.values()) + 1;
+    for (const node of cycleNodes) {
+      depth.set(node.id, fallbackDepth);
+    }
+  }
+  const maxDepth = nodes.length ? Math.max(0, ...nodes.map((node) => depth.get(node.id))) : 0;
+  const statusCounts = new Map();
+  for (const node of nodes) {
+    statusCounts.set(node.state, (statusCounts.get(node.state) || 0) + 1);
+  }
+
+  return {
+    graph,
+    nodes,
+    nodeById,
+    orderedNodes,
+    validEdges,
+    reportedEdgeCount: reportedEdges ? reportedEdges.length : null,
+    malformedEdges,
+    cycleNodeCount: cycleNodes.length,
+    events,
+    eventsAvailable: Array.isArray(graph.events),
+    latestSequence,
+    depth,
+    columnCount: maxDepth + 1,
+    statusCounts,
+  };
+}
+
+function structuredScalar(value) {
+  if (value === undefined) {
+    return {text: "—", type: "unknown"};
+  }
+  if (value === null) {
+    return {text: "null", type: "null"};
+  }
+  if (typeof value === "boolean") {
+    return {text: value ? "true" : "false", type: "boolean"};
+  }
+  if (typeof value === "number") {
+    return {text: Number.isFinite(value) ? String(value) : "—", type: "number"};
+  }
+  return {text: String(value), type: typeof value};
+}
+
+function appendStructuredValue(parent, value, options = {}) {
+  const depth = options.depth || 0;
+  const expanded = options.expanded === true;
+  if (typeof value === "string" && (value.length > MAX_DETAIL_CHARS || value.includes("\n"))) {
+    const details = document.createElement("details");
+    details.className = "structured-long-text";
+    details.open = expanded;
+    details.append(textElement("summary", "", `Text · ${value.length} characters`));
+    details.append(textElement("pre", "structured-text", value));
+    parent.append(details);
+    return;
+  }
+  if (!Array.isArray(value) && !isRecord(value)) {
+    const scalar = structuredScalar(value);
+    const element = textElement("span", "structured-scalar", scalar.text);
+    element.dataset.valueType = scalar.type;
+    parent.append(element);
+    return;
+  }
+
+  const entries = Array.isArray(value) ? value.map((item, index) => [`[${index}]`, item]) : Object.entries(value);
+  const details = document.createElement("details");
+  details.className = "structured-group";
+  details.open = expanded;
+  const kind = Array.isArray(value) ? "List" : "Object";
+  details.append(textElement("summary", "", `${kind} · ${entries.length}`));
+  const fields = document.createElement("dl");
+  fields.className = "structured-fields";
+  if (!entries.length) {
+    fields.append(textElement("div", "structured-empty", "Empty"));
+  } else if (depth >= 10) {
+    fields.append(textElement("div", "structured-empty", "Nested value available in Raw JSON"));
+  } else {
+    for (const [key, item] of entries) {
+      const row = document.createElement("div");
+      row.className = "structured-row";
+      row.append(textElement("dt", "", key));
+      const valueCell = document.createElement("dd");
+      appendStructuredValue(valueCell, item, {depth: depth + 1});
+      row.append(valueCell);
+      fields.append(row);
+    }
+  }
+  details.append(fields);
+  parent.append(details);
+}
+
+function appendStructuredSection(parent, title, value, expanded = false) {
+  const section = document.createElement("section");
+  section.className = "node-evidence-section";
+  section.append(textElement("h4", "", title));
+  appendStructuredValue(section, value, {expanded});
+  parent.append(section);
+}
+
+function appendRunMetric(parent, label, value) {
+  const metric = document.createElement("div");
+  metric.className = "run-summary-metric";
+  metric.append(textElement("dt", "", label));
+  metric.append(textElement("dd", "", value === null || value === undefined ? "—" : String(value)));
+  parent.append(metric);
+}
+
+function appendNodeFacts(parent, node) {
+  const facts = document.createElement("dl");
+  facts.className = "node-facts";
+  appendRunMetric(facts, "Node ID", node.id);
+  appendRunMetric(facts, "Skill", typeof node.data.skill === "string" ? node.data.skill : null);
+  appendRunMetric(facts, "State", node.state === "unknown" ? null : humanizeIdentifier(node.state));
+  appendRunMetric(facts, "First sequence", node.firstSequence);
+  appendRunMetric(facts, "Latest sequence", node.latestSequence);
+  parent.append(facts);
+}
+
+function renderStepEvidence(container, node) {
+  clearElement(container);
+  appendNodeFacts(container, node);
+  appendStructuredSection(container, "Input", node.data.input, true);
+  appendStructuredSection(container, "Result", node.data.result, false);
+  appendStructuredSection(container, "Metadata", node.data.metadata, false);
+}
+
+function statusCountEntries(model) {
+  return [...model.statusCounts.entries()].sort(([left], [right]) => {
+    const leftIndex = RUN_STATUS_ORDER.indexOf(left);
+    const rightIndex = RUN_STATUS_ORDER.indexOf(right);
+    const normalizedLeft = leftIndex === -1 ? RUN_STATUS_ORDER.length : leftIndex;
+    const normalizedRight = rightIndex === -1 ? RUN_STATUS_ORDER.length : rightIndex;
+    return normalizedLeft - normalizedRight || left.localeCompare(right);
+  });
+}
+
+function renderRunOverview(model) {
+  clearElement(elements.runOverview);
+  const summary = document.createElement("dl");
+  summary.className = "run-summary-grid";
+  const finished = model.graph.finished === true
+    ? "Completed"
+    : model.graph.finished === false ? "In progress" : null;
+  appendRunMetric(summary, "Run ID", typeof model.graph.run_id === "string" ? model.graph.run_id : null);
+  appendRunMetric(summary, "Run state", finished);
+  appendRunMetric(summary, "Steps", model.nodes.length);
+  appendRunMetric(summary, "Reported edges", model.reportedEdgeCount);
+  appendRunMetric(summary, "Events", model.eventsAvailable ? model.events.length : null);
+  appendRunMetric(summary, "Latest sequence", model.latestSequence);
+  elements.runOverview.append(summary);
+
+  const counts = document.createElement("div");
+  counts.className = "run-status-counts";
+  counts.append(textElement("span", "run-status-counts-label", "Node states"));
+  if (!model.nodes.length) {
+    counts.append(textElement("span", "run-status-pill", "No nodes reported"));
+  } else {
+    for (const [status, count] of statusCountEntries(model)) {
+      const pill = textElement("span", "run-status-pill", `${humanizeIdentifier(status)} ${count}`);
+      pill.dataset.state = runStateTone(status);
+      counts.append(pill);
+    }
+  }
+  elements.runOverview.append(counts);
+
+  const heading = document.createElement("div");
+  heading.className = "run-section-heading";
+  heading.append(textElement("p", "panel-kicker", "Observed execution"));
+  heading.append(textElement("h3", "", "Execution steps"));
+  elements.runOverview.append(heading);
+
+  if (!model.nodes.length) {
+    elements.runOverview.append(textElement("p", "empty-evidence", "No run nodes were reported."));
+    return;
+  }
+  const steps = document.createElement("div");
+  steps.className = "run-steps";
+  model.orderedNodes.forEach((node, index) => {
+    const details = document.createElement("details");
+    details.className = "run-step";
+    details.dataset.state = runStateTone(node.state);
+    const summaryRow = document.createElement("summary");
+    summaryRow.className = "run-step-summary";
+    summaryRow.append(textElement("span", "run-step-number", String(index + 1).padStart(2, "0")));
+    const identity = document.createElement("span");
+    identity.className = "run-step-identity";
+    identity.append(textElement("strong", "", runStepLabel(node.data, node.id)));
+    identity.append(textElement("code", "", node.id));
+    summaryRow.append(identity);
+    summaryRow.append(textElement("span", "run-step-status", humanizeIdentifier(node.state)));
+    details.append(summaryRow);
+    const body = document.createElement("div");
+    body.className = "run-step-body";
+    details.append(body);
+    details.addEventListener("toggle", () => {
+      if (details.open && body.dataset.rendered !== "true") {
+        renderStepEvidence(body, node);
+        body.dataset.rendered = "true";
+      }
+    });
+    steps.append(details);
+  });
+  elements.runOverview.append(steps);
+}
+
+function renderRunInspector(node) {
+  clearElement(elements.runInspector);
+  if (!node) {
+    elements.runInspector.append(textElement("p", "empty-evidence", "Select a graph node to inspect its evidence."));
+    return;
+  }
+  const heading = document.createElement("div");
+  heading.className = "run-inspector-heading";
+  heading.append(textElement("p", "panel-kicker", "Selected step"));
+  heading.append(textElement("h3", "", runStepLabel(node.data, node.id)));
+  heading.append(textElement("code", "", node.id));
+  elements.runInspector.append(heading);
+  appendNodeFacts(elements.runInspector, node);
+  appendStructuredSection(elements.runInspector, "Complete node record", node.data, true);
+}
+
+function selectRunGraphNode(nodeId, focus = false) {
+  const model = state.runGraphModel;
+  if (!model || !model.nodeById.has(nodeId)) {
+    return;
+  }
+  state.runSelectedNodeId = nodeId;
+  for (const button of elements.runGraphNodes.querySelectorAll(".run-graph-node")) {
+    const selected = button.dataset.nodeId === nodeId;
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+    if (selected && focus) {
+      button.focus();
+    }
+  }
+  renderRunInspector(model.nodeById.get(nodeId));
+}
+
+function svgElement(name) {
+  return document.createElementNS("http://www.w3.org/2000/svg", name);
+}
+
+function drawRunGraphEdges() {
+  state.runGraphFrame = null;
+  const model = state.runGraphModel;
+  if (!model || state.runActiveTab !== "graph" || elements.runPanels.graph.hidden) {
+    return;
+  }
+  clearElement(elements.runGraphEdges);
+  const canvasRect = elements.runGraphCanvas.getBoundingClientRect();
+  const width = Math.max(elements.runGraphCanvas.scrollWidth, elements.runGraphCanvas.clientWidth);
+  const height = Math.max(elements.runGraphCanvas.scrollHeight, elements.runGraphCanvas.clientHeight);
+  elements.runGraphEdges.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  elements.runGraphEdges.setAttribute("width", String(width));
+  elements.runGraphEdges.setAttribute("height", String(height));
+
+  const definitions = svgElement("defs");
+  const marker = svgElement("marker");
+  marker.setAttribute("id", "run-graph-arrow");
+  marker.setAttribute("markerWidth", "8");
+  marker.setAttribute("markerHeight", "8");
+  marker.setAttribute("refX", "7");
+  marker.setAttribute("refY", "4");
+  marker.setAttribute("orient", "auto");
+  const arrow = svgElement("path");
+  arrow.setAttribute("d", "M0,0 L8,4 L0,8 Z");
+  marker.append(arrow);
+  definitions.append(marker);
+  elements.runGraphEdges.append(definitions);
+
+  const buttonById = new Map(
+    [...elements.runGraphNodes.querySelectorAll(".run-graph-node")]
+      .map((button) => [button.dataset.nodeId, button])
+  );
+  for (const edge of model.validEdges) {
+    const source = buttonById.get(edge.source);
+    const target = buttonById.get(edge.target);
+    if (!source || !target) {
+      continue;
+    }
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const sourceX = sourceRect.right - canvasRect.left;
+    const sourceY = sourceRect.top - canvasRect.top + sourceRect.height / 2;
+    const targetX = targetRect.left - canvasRect.left;
+    const targetY = targetRect.top - canvasRect.top + targetRect.height / 2;
+    const span = Math.max(44, Math.abs(targetX - sourceX) / 2);
+    const path = svgElement("path");
+    path.setAttribute(
+      "d",
+      `M ${sourceX} ${sourceY} C ${sourceX + span} ${sourceY}, ${targetX - span} ${targetY}, ${targetX} ${targetY}`
+    );
+    path.setAttribute("marker-end", "url(#run-graph-arrow)");
+    path.dataset.source = edge.source;
+    path.dataset.target = edge.target;
+    elements.runGraphEdges.append(path);
+  }
+}
+
+function scheduleRunGraphEdges() {
+  if (state.runGraphFrame !== null) {
+    window.cancelAnimationFrame(state.runGraphFrame);
+  }
+  state.runGraphFrame = window.requestAnimationFrame(() => {
+    state.runGraphFrame = window.requestAnimationFrame(drawRunGraphEdges);
+  });
+}
+
+function renderRunGraph(model) {
+  clearElement(elements.runGraphNodes);
+  clearElement(elements.runGraphEdges);
+  state.runGraphModel = model;
+  const notes = ["Connectors reflect edges reported by S17. Node position is arranged only for readability."];
+  if (model.malformedEdges) {
+    notes.push(`${model.malformedEdges} malformed ${model.malformedEdges === 1 ? "edge was" : "edges were"} not drawn.`);
+  }
+  if (model.cycleNodeCount) {
+    notes.push(`${model.cycleNodeCount} ${model.cycleNodeCount === 1 ? "node is" : "nodes are"} shown in an unresolved dependency group.`);
+  }
+  elements.runGraphNote.textContent = notes.join(" ");
+  if (!model.nodes.length) {
+    elements.runGraphNodes.append(textElement("p", "empty-evidence", "No run nodes were reported."));
+    state.runSelectedNodeId = null;
+    renderRunInspector(null);
+    return;
+  }
+
+  elements.runGraphNodes.style.setProperty("--graph-columns", String(model.columnCount));
+  const nodesByDepth = new Map();
+  for (const node of model.orderedNodes) {
+    const nodeDepth = model.depth.get(node.id);
+    if (!nodesByDepth.has(nodeDepth)) {
+      nodesByDepth.set(nodeDepth, []);
+    }
+    nodesByDepth.get(nodeDepth).push(node);
+  }
+  for (let depth = 0; depth < model.columnCount; depth += 1) {
+    const column = document.createElement("div");
+    column.className = "run-graph-column";
+    column.dataset.depth = String(depth);
+    for (const node of nodesByDepth.get(depth) || []) {
+      const button = document.createElement("button");
+      button.className = "run-graph-node";
+      button.type = "button";
+      button.dataset.nodeId = node.id;
+      button.dataset.state = runStateTone(node.state);
+      button.setAttribute("aria-pressed", "false");
+      button.setAttribute("aria-label", `${runStepLabel(node.data, node.id)}, ${humanizeIdentifier(node.state)}, ${node.id}`);
+      button.append(textElement("span", "run-graph-node-state", humanizeIdentifier(node.state)));
+      button.append(textElement("strong", "", runStepLabel(node.data, node.id)));
+      button.append(textElement("code", "", node.id));
+      button.addEventListener("click", () => selectRunGraphNode(node.id));
+      column.append(button);
+    }
+    elements.runGraphNodes.append(column);
+  }
+  const selected = model.nodeById.has(state.runSelectedNodeId)
+    ? state.runSelectedNodeId
+    : model.orderedNodes[0].id;
+  selectRunGraphNode(selected);
+  scheduleRunGraphEdges();
+}
+
+function setRunTab(tabName, focus = false) {
+  const selectedName = Object.prototype.hasOwnProperty.call(elements.runPanels, tabName)
+    ? tabName
+    : "overview";
+  state.runActiveTab = selectedName;
+  for (const tab of elements.runTabs) {
+    const selected = tab.dataset.runTab === selectedName;
+    tab.setAttribute("aria-selected", selected ? "true" : "false");
+    tab.tabIndex = selected ? 0 : -1;
+    if (selected && focus) {
+      tab.focus();
+    }
+  }
+  for (const [name, panel] of Object.entries(elements.runPanels)) {
+    panel.hidden = name !== selectedName;
+  }
+  if (selectedName === "graph") {
+    scheduleRunGraphEdges();
+  }
+}
+
+function renderRunEvidence(graph) {
+  const model = buildRunGraphModel(graph);
+  const stateLabel = graph.finished === true
+    ? "Completed"
+    : graph.finished === false ? "In progress" : "State unavailable";
+  const runId = typeof graph.run_id === "string" ? graph.run_id : "Run ID unavailable";
+  elements.runMeta.textContent = `${runId} · ${stateLabel}`;
+  elements.runContent.textContent = JSON.stringify(graph, null, 2);
+  renderRunOverview(model);
+  renderRunGraph(model);
+}
+
+function renderRunEvidenceMessage(message) {
+  clearElement(elements.runOverview);
+  elements.runOverview.append(textElement("p", "empty-evidence", message));
+  clearElement(elements.runGraphNodes);
+  elements.runGraphNodes.append(textElement("p", "empty-evidence", message));
+  clearElement(elements.runGraphEdges);
+  state.runGraphModel = null;
+  state.runSelectedNodeId = null;
+  renderRunInspector(null);
+  elements.runContent.textContent = message;
 }
 
 function isRefusal(event, node) {
@@ -936,16 +1507,19 @@ async function openCodeDialog() {
 
 async function openRunDialog() {
   elements.runMeta.textContent = state.runId ? `Run ${state.runId}` : "No run selected";
-  elements.runContent.textContent = "Loading raw graph…";
+  state.runSelectedNodeId = null;
+  setRunTab("overview");
+  renderRunEvidenceMessage(state.runId ? "Loading run evidence…" : "No run is selected.");
   elements.runDialog.showModal();
   if (!state.runId) {
     return;
   }
   try {
     const graph = await forceGraphRefresh(state.runId);
-    elements.runContent.textContent = JSON.stringify(graph, null, 2);
+    renderRunEvidence(graph);
   } catch (error) {
-    elements.runContent.textContent = error.message || "The raw graph could not be read.";
+    elements.runMeta.textContent = "Run evidence unavailable";
+    renderRunEvidenceMessage(error.message || "The run graph could not be read.");
   }
 }
 
@@ -970,6 +1544,8 @@ async function resetSession() {
     state.followUpSubmitting = false;
     state.graph = null;
     state.nodeCache = new Map();
+    state.runGraphModel = null;
+    state.runSelectedNodeId = null;
     state.seen = new Set();
     clearActivity();
     updateTelemetry();
@@ -1037,6 +1613,26 @@ elements.followUpPrompt.addEventListener("input", updateFollowUpCount);
 elements.viewCode.addEventListener("click", openCodeDialog);
 elements.viewRun.addEventListener("click", openRunDialog);
 elements.reset.addEventListener("click", resetSession);
+for (const tab of elements.runTabs) {
+  tab.addEventListener("click", () => setRunTab(tab.dataset.runTab));
+  tab.addEventListener("keydown", (event) => {
+    const currentIndex = elements.runTabs.indexOf(tab);
+    let nextIndex = null;
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % elements.runTabs.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex = (currentIndex - 1 + elements.runTabs.length) % elements.runTabs.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = elements.runTabs.length - 1;
+    }
+    if (nextIndex !== null) {
+      event.preventDefault();
+      setRunTab(elements.runTabs[nextIndex].dataset.runTab, true);
+    }
+  });
+}
 for (const button of document.querySelectorAll("[data-close-dialog]")) {
   button.addEventListener("click", () => button.closest("dialog").close());
 }
@@ -1048,6 +1644,7 @@ for (const dialog of document.querySelectorAll("dialog")) {
   });
 }
 window.addEventListener("message", handlePreviewMessage);
+window.addEventListener("resize", scheduleRunGraphEdges);
 window.addEventListener("pagehide", () => {
   state.eventSource?.close();
   destroyPreview();

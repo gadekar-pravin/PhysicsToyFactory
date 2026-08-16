@@ -245,6 +245,125 @@ async def test_recorded_red_green_activity_and_safe_dialogs(
 @pytest.mark.browser
 @pytest.mark.activity
 @pytest.mark.asyncio
+async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
+    browser_page: Page,
+    live_product: str,
+    fake_s17: FakeS17,
+    settings,
+    recorded_graph: dict,
+) -> None:
+    graph = copy.deepcopy(recorded_graph)
+    hostile_node_id = '<img id="node-attack" src=x onerror=alert(1)>'
+    graph["nodes"]["repair"]["state"] = "failed"
+    graph["nodes"][hostile_node_id] = {
+        "skill": "custom_untrusted_step",
+        "input": {"prompt": '<script id="input-attack">alert(1)</script>'},
+        "metadata": {"side_effect": False},
+    }
+    graph["edges"] = [
+        ["write", "check_red"],
+        ["check_red", "repair"],
+        ["repair", "check_green"],
+        ["check_green", "answer"],
+        ["write", "missing-node"],
+    ]
+    complete_recorded_run(fake_s17, settings, graph)
+
+    await browser_page.goto(live_product)
+    await browser_page.locator("#prompt").fill("A graph evidence fixture")
+    await browser_page.locator("#create-button").click()
+    await expect(browser_page.locator("#app")).to_have_attribute("data-state", "ready")
+    await browser_page.locator("#view-run").click()
+
+    dialog = browser_page.locator("#run-dialog")
+    await expect(dialog).to_be_visible()
+    await expect(browser_page.locator("#run-tab-overview")).to_have_attribute(
+        "aria-selected", "true"
+    )
+    await expect(browser_page.locator("#run-panel-overview")).to_be_visible()
+    summary = browser_page.locator(".run-summary-grid")
+    for expected in ("run-fake-1", "Completed", "6", "5", "12"):
+        await expect(summary).to_contain_text(expected)
+    await expect(browser_page.locator(".run-status-counts")).to_contain_text("Succeeded 4")
+    await expect(browser_page.locator(".run-status-counts")).to_contain_text("Failed 1")
+    await expect(browser_page.locator(".run-status-counts")).to_contain_text("Unknown 1")
+    steps = browser_page.locator(".run-step")
+    await expect(steps).to_have_count(6)
+    await expect(steps.last.locator("summary")).to_contain_text("Custom untrusted step")
+    await steps.last.locator("summary").click()
+    await expect(steps.last).to_contain_text("input-attack")
+    assert await dialog.locator("img").count() == 0
+    assert await dialog.locator("script#input-attack").count() == 0
+
+    overview_tab = browser_page.locator("#run-tab-overview")
+    await overview_tab.focus()
+    await overview_tab.press("ArrowRight")
+    await expect(browser_page.locator("#run-tab-graph")).to_have_attribute(
+        "aria-selected", "true"
+    )
+    await expect(browser_page.locator("#run-panel-graph")).to_be_visible()
+    graph_nodes = browser_page.locator(".run-graph-node")
+    await expect(graph_nodes).to_have_count(6)
+    await expect(browser_page.locator("#run-graph-edges > path")).to_have_count(4)
+    await expect(browser_page.locator("#run-graph-note")).to_contain_text(
+        "1 malformed edge was not drawn"
+    )
+    hostile_node = graph_nodes.filter(has_text="Custom untrusted step")
+    await hostile_node.click()
+    await expect(browser_page.locator("#run-inspector")).to_contain_text(hostile_node_id)
+    await expect(browser_page.locator("#run-inspector")).to_contain_text("input-attack")
+    assert await dialog.locator("img").count() == 0
+
+    await browser_page.locator("#run-tab-raw").click()
+    await expect(browser_page.locator("#run-panel-raw")).to_be_visible()
+    expected_raw = await browser_page.evaluate(
+        "fetch('/api/runs/run-fake-1').then(response => response.json())"
+        ".then(graph => JSON.stringify(graph, null, 2))"
+    )
+    assert await browser_page.locator("#run-content").text_content() == expected_raw
+    assert await dialog.locator("img").count() == 0
+
+    await browser_page.set_viewport_size({"width": 390, "height": 844})
+    bounds = await dialog.bounding_box()
+    assert bounds is not None
+    assert bounds["x"] >= 0 and bounds["y"] >= 0
+    assert bounds["x"] + bounds["width"] <= 391
+    assert bounds["y"] + bounds["height"] <= 845
+    await browser_page.keyboard.press("Escape")
+    await expect(dialog).to_be_hidden()
+
+    async def in_progress_graph(route: Route) -> None:
+        await route.fulfill(
+            json={
+                "run_id": "run-fake-1",
+                "finished": False,
+                "nodes": {
+                    "active": {"skill": "read_code", "state": "running"},
+                    "unknown": {"result": None},
+                },
+                "edges": [["active", "unknown"], ["unknown", "active"], ["active"], "bad"],
+            }
+        )
+
+    await browser_page.route("**/api/runs/run-fake-1", in_progress_graph)
+    await browser_page.locator("#view-run").click()
+    await expect(summary).to_contain_text("In progress")
+    await expect(summary).to_contain_text("Events—")
+    await browser_page.locator("#run-tab-graph").click()
+    await expect(browser_page.locator("#run-graph-note")).to_contain_text(
+        "2 malformed edges were not drawn"
+    )
+    await expect(browser_page.locator("#run-graph-note")).to_contain_text(
+        "2 nodes are shown in an unresolved dependency group"
+    )
+    await expect(graph_nodes).to_have_count(2)
+    await expect(browser_page.locator("#run-graph-edges > path")).to_have_count(2)
+    assert await dialog.locator("img").count() == 0
+
+
+@pytest.mark.browser
+@pytest.mark.activity
+@pytest.mark.asyncio
 async def test_reconnect_snapshot_and_replayed_sequence_add_no_rows(
     browser_page: Page,
     live_product: str,
