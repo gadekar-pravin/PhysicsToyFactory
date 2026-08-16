@@ -14,6 +14,12 @@ const elements = {
   previewStatus: document.querySelector("#preview-status"),
   previewStatusText: document.querySelector("#preview-status-text"),
   stageLockText: document.querySelector("#stage-lock-text"),
+  headerRunStatus: document.querySelector("#header-run-status"),
+  telemetryCage: document.querySelector("#telemetry-cage"),
+  telemetryRevision: document.querySelector("#telemetry-revision"),
+  telemetryRun: document.querySelector("#telemetry-run"),
+  telemetrySequence: document.querySelector("#telemetry-sequence"),
+  telemetryWatchdog: document.querySelector("#telemetry-watchdog"),
   systemBanner: document.querySelector("#system-banner"),
   systemBannerText: document.querySelector("#system-banner-text"),
   transportState: document.querySelector("#transport-state"),
@@ -47,6 +53,7 @@ const state = {
   session: null,
   healthReady: false,
   runId: null,
+  latestSequence: null,
   eventSource: null,
   eventQueue: Promise.resolve(),
   seen: new Set(),
@@ -125,7 +132,42 @@ function setMode(mode) {
   elements.stageOverline.textContent = copy.overline;
   elements.stageTitle.textContent = copy.title;
   elements.stageDescription.textContent = copy.description;
+  updateTelemetry();
   updateControls();
+}
+
+function compactIdentifier(value, visible = 12) {
+  if (typeof value !== "string" || !value) {
+    return "—";
+  }
+  return value.length > visible ? `${value.slice(0, visible)}…` : value;
+}
+
+function updateTelemetry() {
+  const previewState = elements.simulationStage.dataset.previewState || "locked";
+  const cageLabels = {
+    locked: "Locked",
+    loading: "Opening",
+    ready: "Active",
+    error: "Stopped",
+    timeout: "Stopped",
+  };
+  const watchdogLabels = {
+    locked: "Idle",
+    loading: "Armed",
+    ready: "Passed",
+    error: "Stopped",
+    timeout: "Stopped",
+  };
+  const run = compactIdentifier(state.runId);
+  const sequence = Number.isInteger(state.latestSequence) ? String(state.latestSequence) : "—";
+  elements.telemetryCage.textContent = cageLabels[previewState] || "—";
+  elements.telemetryRevision.textContent = compactIdentifier(state.session?.current_sketch_sha256, 10);
+  elements.telemetryRun.textContent = run;
+  elements.telemetrySequence.textContent = sequence;
+  elements.telemetryWatchdog.textContent = watchdogLabels[previewState] || "—";
+  elements.headerRunStatus.hidden = !state.runId;
+  elements.headerRunStatus.textContent = state.runId ? `RUN ${run} · SEQ ${sequence}` : "";
 }
 
 function activeRun() {
@@ -195,6 +237,7 @@ function setPreviewState(previewState, message = "") {
   } else {
     elements.stageLockText.textContent = "Preview cage locked";
   }
+  updateTelemetry();
 }
 
 function exactKeys(value, expected) {
@@ -477,6 +520,7 @@ function appendActivity(evidence, presentation) {
 
 function resetRunState(runId, runKind = "create") {
   state.runId = runId;
+  state.latestSequence = null;
   state.runKind = runKind;
   state.seen = new Set();
   state.graph = null;
@@ -491,6 +535,7 @@ function resetRunState(runId, runKind = "create") {
   state.graphTimer = null;
   state.graphRefresh = null;
   clearActivity();
+  updateTelemetry();
   updateControls();
 }
 
@@ -675,6 +720,10 @@ async function processEvent(event) {
     return;
   }
   if (event.type === "STATE_SNAPSHOT") {
+    if (Number.isInteger(event.seq) && event.seq >= 0) {
+      state.latestSequence = Math.max(state.latestSequence ?? -1, event.seq);
+      updateTelemetry();
+    }
     if (event.state && typeof event.state === "object") {
       // A reconnect snapshot replaces folded AG-UI state. It is transport state, not a journal row.
       state.foldedState = event.state;
@@ -691,6 +740,8 @@ async function processEvent(event) {
     return;
   }
   state.seen.add(key);
+  state.latestSequence = Math.max(state.latestSequence ?? -1, sequence);
+  updateTelemetry();
   const nodeId = typeof event.stepName === "string" ? event.stepName : null;
   const evidence = {runId: state.runId, sequence, sourceKind, nodeId};
 
@@ -914,12 +965,14 @@ async function resetSession() {
     destroyPreview();
     setPreviewState("locked");
     state.runId = null;
+    state.latestSequence = null;
     state.runKind = null;
     state.followUpSubmitting = false;
     state.graph = null;
     state.nodeCache = new Map();
     state.seen = new Set();
     clearActivity();
+    updateTelemetry();
     elements.prompt.value = "";
     elements.followUpPrompt.value = "";
     updatePromptCount();

@@ -22,6 +22,7 @@
             <small>Factory / Lab 17</small>
           </span>
         </a>
+        <p class="header-run-status" id="header-run-status" aria-live="polite" hidden></p>
         <nav class="header-actions" aria-label="Workspace actions">
           <button class="button button-quiet" id="view-code" type="button" disabled>
             View code
@@ -95,6 +96,28 @@
                 <span id="stage-lock-text">Preview cage locked</span>
               </div>
             </div>
+            <dl class="telemetry-rail" aria-label="Verified factory telemetry">
+              <div>
+                <dt>Cage</dt>
+                <dd id="telemetry-cage">Locked</dd>
+              </div>
+              <div>
+                <dt>Revision</dt>
+                <dd id="telemetry-revision">—</dd>
+              </div>
+              <div>
+                <dt>Run</dt>
+                <dd id="telemetry-run">—</dd>
+              </div>
+              <div>
+                <dt>Sequence</dt>
+                <dd id="telemetry-sequence">—</dd>
+              </div>
+              <div>
+                <dt>Watchdog</dt>
+                <dd id="telemetry-watchdog">Idle</dd>
+              </div>
+            </dl>
           </section>
 
           <aside class="activity-panel panel" aria-labelledby="activity-title">
