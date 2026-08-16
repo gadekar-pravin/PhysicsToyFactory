@@ -51,6 +51,33 @@ the agent read.
 Three processes: the gateway holds the keys, S17Code runs the loop, and this product is the
 frontend. S17 holds no credential, and the browser never receives one either.
 
+> **Runs cost real money.** The planner is a live frontier model and there is no offline or dry-run
+> mode for the product path. Each run is capped by `PTF_S17_RUN_BUDGET_USD` (default `$0.50`); a
+> typical creation spends `$0.03`–`$0.07`.
+
+### Prerequisites
+
+All of these must be true before anything starts. Each has a check — run them all, because two of
+these failures do not surface until a run is already underway.
+
+| Requirement | Check | Expected |
+| --- | --- | --- |
+| Python 3.12+ and [`uv`](https://docs.astral.sh/uv/) | `uv --version` | a version |
+| Docker daemon running | `docker info --format '{{.ServerVersion}}'` | a version, no error |
+| Docker socket path | `docker context inspect --format '{{.Endpoints.docker.Host}}'` | a `unix://…` path — keep it, step 4 needs it |
+| Node.js 20+ as `node` | `node --version` | `v20` or newer |
+| **Ollama serving `nomic-embed-text`** | `curl -sS http://127.0.0.1:11434/api/tags` | JSON listing `nomic-embed-text` |
+| **Provider credentials in `glc_v5/.env`** | `grep -c API_KEY glc_v5/.env` | at least one |
+| Playwright Chromium (browser tests only) | `uv run playwright install chromium` | installs or confirms |
+
+Ollama is not optional and its absence is the easiest failure here to misdiagnose: `s17code` builds
+its embedder unconditionally with no fallback, so the planner appears to work and the run then dies
+at the final step. This repository holds no provider credentials by design — the gateway owns them
+all.
+
+There is deliberately no npm project, JavaScript package manager, frontend build, or runtime CDN
+dependency.
+
 ```bash
 git clone https://github.com/theschoolofai/glc_v5.git
 git clone https://github.com/theschoolofai/S17Code.git
@@ -60,8 +87,16 @@ git clone https://github.com/gadekar-pravin/PhysicsToyFactory.git
 **1. Gateway — port 8111**
 
 ```bash
-cd glc_v5 && uv sync && uv run glc serve
+cd glc_v5 && uv sync
+set -a; source .env; set +a
+export GLC_GATEWAY_DB="$PWD/.gateway.sqlite"
+uv run glc serve
 ```
+
+Give the gateway its own database. Sharing the default `~/.glc/gateway.sqlite` with an older GLC
+generation makes it start healthy and then fail every model call at insert time, because that file's
+`calls` table carries a `CHECK` constraint glc_v5 never writes. Do not migrate or delete that file —
+it is an audit ledger.
 
 **2. Build the checker image** (from this repository; digest-pinned and non-root)
 
@@ -70,7 +105,19 @@ docker build -f containers/phase6-node.Dockerfile -t physics-toy-factory-node:22
 docker run --rm physics-toy-factory-node:22.20.0-phase6 id -u   # expect 1000, not 0
 ```
 
-**3. Engine — port 8113.** Start S17Code with this product-specific profile. The profile *is* the
+**3. Product — port 8120.** Start this *before* S17: on first boot it copies its immutable seed into
+`PTF_WORKSPACE`, git-inits it, and tags `physics-toy-base-v1` — the tag reset returns to. S17
+refuses to open a workspace directory that does not exist yet, so the reverse order cannot work the
+first time. After that first boot, order no longer matters.
+
+```bash
+cd PhysicsToyFactory
+cp .env.example .env          # then set the token and both absolute paths
+uv sync --locked --dev
+uv run physics-toy-factory
+```
+
+**4. Engine — port 8113.** Start S17Code with this product-specific profile. The profile *is* the
 security boundary, so do not relax it:
 
 ```text
@@ -83,38 +130,38 @@ S17_PROTECTED_PATHS=.physics-toy-workspace,P5_API.md,p5check.js,shell/**,tests/*
 S17_MAX_REPEAT_FAILURES=3
 S17_EXEC_CONTAINER=1
 S17_EXEC_IMAGE=physics-toy-factory-node:22.20.0-phase6
+DOCKER_HOST=<the unix:// path from the prerequisite check>
 ```
 
 ```bash
 cd S17Code && uv sync && uv run s17code serve
 ```
 
-Keep `S17_SANDBOX_ROOT` and `S17_SKILLS_DIR` present but empty. S17 loads its repository `.env` on
-import; unsetting them lets dotenv restore generic capabilities outside this profile.
+Three of these are easy to get wrong:
 
-**4. Product — port 8120**
+- **`S17_WORKSPACE` must equal `PTF_WORKSPACE` exactly.** They are one directory shared by two
+  processes; a different path is a silently broken run, not an error.
+- **Keep `S17_SANDBOX_ROOT` and `S17_SKILLS_DIR` present but empty.** S17 loads its repository `.env`
+  on import and dotenv never overrides an already-set variable, so an empty-but-present value wins
+  while an unset one gets repopulated — handing the planner generic capabilities outside this
+  profile.
+- **`DOCKER_HOST` is required whenever the daemon is not on `/var/run/docker.sock`**, which is the
+  normal case for Docker Desktop on macOS. The checker runs with a scrubbed environment that
+  forwards it only if already set; without it every check exits `125`.
+
+**5. Confirm the whole topology before typing a prompt**
 
 ```bash
-cp .env.example .env          # then set the token and both absolute paths
-uv sync --locked --dev
-uv run playwright install chromium
-uv run physics-toy-factory
+curl -sS http://127.0.0.1:8111/healthz          # gateway process
+curl -sS http://127.0.0.1:8111/v1/providers     # gateway can actually route
+curl -sS http://127.0.0.1:8113/healthz          # S17 process
+curl -sS http://127.0.0.1:8113/readyz           # S17 -> gateway
+curl -sS http://127.0.0.1:8120/api/health       # the product's own view
 ```
 
-**5. Confirm the topology before typing a prompt**
-
-```bash
-curl -s http://127.0.0.1:8120/api/health
-```
-
-Expect `"status": "ok"` with `workspace.verified: true` and both `s17.process.up` and
-`s17.gateway.ready` true. If any of those is false the UI says so and refuses to start a run rather
-than failing halfway through one.
-
-Requirements: Python 3.12+, [`uv`](https://docs.astral.sh/uv/), Node.js 20+ as `node`, Docker, and
-Playwright Chromium for the browser tests. There is deliberately no npm project, frontend build, or
-runtime CDN dependency. On first start the product copies its immutable seed into `PTF_WORKSPACE`,
-git-inits it, and tags `physics-toy-base-v1` — the tag reset returns to.
+From the product, expect `"status": "ok"` with `workspace.verified: true` and both `s17.process.up`
+and `s17.gateway.ready` true. If any of those is false the UI says so and refuses to start a run
+rather than failing halfway through one.
 
 Running all three on relocated ports, or diagnosing a bring-up, is covered step by step in
 [`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md).
