@@ -4,6 +4,10 @@ Recorded on 2026-08-15 and 2026-08-16 UTC. Live qualification is a release/demo 
 deterministic CI. This record preserves the original failed qualification, the remediation canary,
 and the later successful full requalification as distinct evidence sets.
 
+Each section states the revisions its runs were produced at, and those statements are never revised.
+The dependency revisions have since been superseded; read the closing addendum before reproducing
+anything here.
+
 ## Source and runtime profile
 
 - PhysicsToyFactory base revision: `e43989e111be2a16dfad27591afd606a7e6d9db4`
@@ -167,3 +171,70 @@ The full Phase 6 live gate now passes. Together with the green deterministic gat
 the specified MVP qualification. Browser-only automatic repair, Surprise Me, skill A/B,
 planted-refusal demonstrations, persistent multi-user sessions, and additional follow-ups remain
 outside the MVP boundary.
+
+## Addendum, 2026-08-16 UTC: dependency revisions superseded
+
+This addendum records a later change to the dependency revisions. It amends nothing above. Every
+run, run ID, hash, route, and spend figure recorded earlier was produced at the revisions stated in
+those sections and remains the record of live behaviour at those revisions.
+
+Two statements above are stale as descriptions of the present, though both were accurate when
+written:
+
+- "It is pushed on `phase6-container-command-result`; it is not part of S17 main." That branch has
+  since been merged. It was rebased before merge, so the qualifying commit
+  `4e085cb2e869694f036df2a6171530e147077e85` is not itself on `main`; its content is, as `d0c2720`,
+  merged by `7bf4b1e937699449a6a883e4862184559db1a91b`.
+- The S17 live dependency revision is no longer reachable. `4e085cb` is contained by no ref, local or
+  remote, and will be discarded whenever `git gc` prunes unreachable objects. It cannot be assumed
+  available for future reproduction.
+
+`docs/PHASE6_RUNBOOK.md` was therefore re-pinned in `2b1eb7b`:
+
+| Repository | Runbook pin from 2026-08-16 | Qualified at, above |
+| --- | --- | --- |
+| S17Code | `7bf4b1e937699449a6a883e4862184559db1a91b` | `4e085cb2e869694f036df2a6171530e147077e85` |
+| glc_v5 | `77054f4b7a4d9879d33c5221ff08a35fdf48eb10` | `66ed155addd78fe8f59673ddca59e0277a7d39e8` |
+
+### Reviewed deltas between the qualified and re-pinned revisions
+
+- glc_v5 `66ed155..77054f4`: `.env.example` only. Documentation; no runtime behaviour.
+- S17Code `4e085cb..7bf4b1e`: a README authorization example, added tests, and `num_ctx=512` pinned on
+  `nomic-embed-text` requests in `s17code/core/memory/embeddings.py`.
+
+The embedding change is on the qualified live path, not beside it: `runtime.py` constructs the
+embedder for every run, and a succeeded `answer_with_evidence` writes an episode through
+`MemoryStore.write`. Embedding text representative of a recorded answer, with and without the pin, on
+the same local `nomic-embed-text` runner produced byte-identical 768-dimension vectors with a maximum
+absolute drift of `0.000e+00`. The pin moves Ollama's truncation point to one the runner survives; it
+does not alter vectors for text that already fits.
+
+### Deterministic verification at the re-pinned revisions
+
+```text
+S17Code    uv run ruff check .                 PASS
+S17Code    uv run pytest -q                    PASS: 498 passed, 1 skipped
+S17Code    Phase 0 offline budget proof        PASS
+S17Code    Phase 0 offline denial-of-wallet    PASS
+S17Code    Phase 0 offline trace-export proof  PASS
+Product    uv run ruff check .                 PASS
+Product    uv run pytest -q -m "not browser"   PASS: 183 passed, 8 deselected
+Product    uv run pytest -q -m browser         PASS: 8 passed, 183 deselected
+```
+
+The container checker path was exercised directly at the re-pinned S17 revision: `run_command`
+returned exit `0` from the pinned image under `--network=none`, with a JSON-serialisable result. The
+judge image is unchanged at
+`sha256:1592c97f88b3d45ad796dd292877010dc5bbf2d6b90a7742f4507ed3ae6d4524`.
+
+The same probe with `DOCKER_HOST` unset returned exit `125` and
+`Cannot connect to the Docker daemon at unix:///var/run/docker.sock`, reproducing the defect that
+stopped `run-e48a22aa0e57`. That variable is now a required export in the runbook.
+
+### Unresolved limitation
+
+**No live model run has been executed at the re-pinned revisions.** The deterministic gates above are
+not a live gate, and this addendum does not extend the passing live qualification to them. Qualifying
+at the re-pinned revisions requires a separately authorized canary followed by the full suite,
+published as its own evidence set. The retained live pass remains attributable only to the revisions
+recorded in the sections above.
