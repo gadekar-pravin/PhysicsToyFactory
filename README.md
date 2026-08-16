@@ -154,6 +154,11 @@ container profile, exercise all four suggested prompts and the two-step solar-sy
 real red-to-green repair journal, and capture the final verified preview. The tooling fails if a run
 does not converge; it never turns a first-attempt pass or fabricated event into repair evidence.
 
+To bring the same three-process topology up by hand and drive it in a browser — for a demonstration,
+for exploration, or to diagnose something you can see on screen — follow
+[`docs/MANUAL_TESTING.md`](docs/MANUAL_TESTING.md) instead. A hand-driven run is never publishable
+evidence: it produces no sanitized graph, hash set, or reviewed summary.
+
 The retained 2026-08-15 evidence records a passed genuine repair proof but a failed product
 qualification: all five create graphs finished without `answer_with_evidence`, the linked follow-up
 was therefore rejected with HTTP 409, and no verified preview screenshot was captured. This remains
