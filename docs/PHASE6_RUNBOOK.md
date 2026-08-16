@@ -26,6 +26,7 @@ PTF_HOST=127.0.0.1
 PTF_PORT=8120
 PTF_S17_BASE_URL=http://127.0.0.1:8113
 PTF_S17_CONTROL_TOKEN=<same-private-value-as-S17_CONTROL_TOKEN>
+PTF_S17_RUN_BUDGET_USD=0.50
 PTF_WORKSPACE=<absolute-dedicated-runtime-dir>/workspace
 PTF_ARTIFACT_DIR=<absolute-separate-runtime-dir>/artifacts
 PTF_MAX_PROMPT_CHARS=4000
@@ -72,8 +73,8 @@ Start from S17Code after loading its ignored provider/control environment, then 
 boundary in that terminal:
 
 ```bash
-unset S17_SANDBOX_ROOT
-unset S17_SKILLS_DIR
+export S17_SANDBOX_ROOT=
+export S17_SKILLS_DIR=
 export S17_WORKSPACE=<exact-same-absolute-path-as-PTF_WORKSPACE>
 export S17_ALLOWED_COMMANDS=node
 export S17_PROTECTED_PATHS='.physics-toy-workspace,P5_API.md,p5check.js,shell/**,tests/**,test/**,**/tests/**,**/test_*.py,**/*_test.py,conftest.py,**/conftest.py,pytest.ini,tox.ini,setup.cfg,pyproject.toml,.github/**'
@@ -83,9 +84,17 @@ export S17_EXEC_IMAGE=physics-toy-factory-node:22.20.0-phase6
 uv run s17code serve
 ```
 
-Clearing the generic sandbox and Markdown-skill roots is part of the product profile. It removes
-unrelated `read_file`, `write_file`, indexing, calendar, and `load_skill` choices so the planner reads
-`P5_API.md` and `sketch.js` only through the coding workspace capabilities.
+The explicit empty exports are intentional. S17 loads its repository `.env` at import time, and an
+`unset` variable would be repopulated from that file. Empty-but-present values block that dotenv
+fallback. This removes unrelated `read_file`, `write_file`, indexing, calendar, and `load_skill`
+choices so the planner reads `P5_API.md` and `sketch.js` only through the coding workspace
+capabilities.
+
+Before starting the server, prove that dotenv cannot resurrect those roots in this terminal:
+
+```bash
+uv run python -c 'import os; from dotenv import load_dotenv; load_dotenv(".env"); assert os.getenv("S17_SANDBOX_ROOT") == ""; assert os.getenv("S17_SKILLS_DIR") == ""'
+```
 
 Verify both endpoints before spending on a run:
 

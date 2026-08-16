@@ -159,6 +159,10 @@ qualification: all five create graphs finished without `answer_with_evidence`, t
 was therefore rejected with HTTP 409, and no verified preview screenshot was captured. Deterministic
 tests are green, but the live Phase 6 release gate and the MVP qualification remain incomplete.
 
+Product runs include the validated `PTF_S17_RUN_BUDGET_USD` ceiling (default `$0.50`) and a stable
+demo principal. This keeps creation and follow-up on S17's configured, metered model ladder rather
+than its unbudgeted gateway default.
+
 ## Trusted fixture
 
 The packaged fixture contains the workspace marker, `P5_API.md`, `p5check.js`, and the entire iframe
@@ -176,6 +180,8 @@ product-specific profile:
 
 ```text
 S17_CONTROL_TOKEN=<same private value as PTF_S17_CONTROL_TOKEN>
+S17_SANDBOX_ROOT=
+S17_SKILLS_DIR=
 S17_WORKSPACE=<exact real path of PTF_WORKSPACE>
 S17_ALLOWED_COMMANDS=node
 S17_PROTECTED_PATHS=.physics-toy-workspace,P5_API.md,p5check.js,shell/**,tests/**,test/**,**/tests/**,**/test_*.py,**/*_test.py,conftest.py,**/conftest.py,pytest.ini,tox.ini,setup.cfg,pyproject.toml,.github/**
@@ -183,6 +189,9 @@ S17_MAX_REPEAT_FAILURES=3
 S17_EXEC_CONTAINER=1
 S17_EXEC_IMAGE=<pinned non-root Node image>
 ```
+
+Keep the sandbox and skills variables present but empty. S17 loads its repository `.env` on import;
+unsetting them would let dotenv restore generic capabilities outside the product workspace profile.
 
 Expose `S17_EXEC_CONTAINER` and `S17_EXEC_IMAGE` to the product process as well so `/api/health` can
 report the configured mode. That report is configuration visibility, not independent proof that the

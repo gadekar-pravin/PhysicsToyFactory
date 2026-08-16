@@ -88,6 +88,8 @@ async def test_create_returns_id_before_fake_execution_completes_with_exact_auth
     assert body["project_id"] == "demo"
     assert body["user_id"] == "local-audience"
     assert body["agent_id"] == "p5-builder"
+    assert body["budget"] == product.settings.s17_run_budget_usd
+    assert body["principal"] == "session:physics-toy-factory-demo"
     assert "Rain around my mouse" in body["prompt"]
     session = (await product.client.get("/api/session")).json()["session"]
     assert session["state"] == "running"
@@ -352,6 +354,8 @@ async def test_follow_up_is_linked_anchored_reverified_and_allowed_only_once(pro
     start = product.fake.starts[-1]
     assert start["allowed_side_effects"] == ["edit_code", "run_command"]
     assert "create_file" not in start["allowed_side_effects"]
+    assert start["budget"] == product.settings.s17_run_budget_usd
+    assert start["principal"] == "session:physics-toy-factory-demo"
     assert "Read sketch.js with read_code" in start["prompt"]
     assert "exact unique anchor" in start["prompt"]
     session = (await product.client.get("/api/session")).json()["session"]

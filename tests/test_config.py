@@ -24,6 +24,7 @@ def test_load_settings_applies_locked_defaults(tmp_path: Path) -> None:
     assert settings.host == "127.0.0.1"
     assert settings.port == 8120
     assert str(settings.s17_base_url) == "http://127.0.0.1:8113/"
+    assert settings.s17_run_budget_usd == 0.50
     assert settings.max_prompt_chars == 4000
     assert settings.http_connect_timeout_seconds == 3
     assert settings.http_read_timeout_seconds == 30
@@ -46,11 +47,22 @@ def test_environment_overrides_dotenv_once(tmp_path: Path) -> None:
     )
     environment = valid_environment(tmp_path)
     environment["PTF_PORT"] = "8121"
+    environment["PTF_S17_RUN_BUDGET_USD"] = "0.25"
 
     settings = load_settings(env_file=env_file, environ=environment)
 
     assert settings.port == 8121
     assert settings.s17_control_token.get_secret_value() == "test-private-control-token"
+    assert settings.s17_run_budget_usd == 0.25
+
+
+@pytest.mark.parametrize("value", ["0", "-0.01", "nan", "inf"])
+def test_run_budget_must_be_positive_and_finite(tmp_path: Path, value: str) -> None:
+    environment = valid_environment(tmp_path)
+    environment["PTF_S17_RUN_BUDGET_USD"] = value
+
+    with pytest.raises(ValidationError):
+        load_settings(env_file=None, environ=environment)
 
 
 @pytest.mark.parametrize("field", ["PTF_S17_CONTROL_TOKEN", "PTF_WORKSPACE", "PTF_ARTIFACT_DIR"])

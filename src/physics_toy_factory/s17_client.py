@@ -16,6 +16,7 @@ RUN_ID_PATTERN = re.compile(r"^run-[A-Za-z0-9._-]{1,124}$")
 MAX_SSE_FRAME_BYTES = 262_144
 MAX_START_RESPONSE_BYTES = 16_384
 MAX_RUN_RESPONSE_BYTES = 2_000_000
+PRODUCT_BUDGET_PRINCIPAL = "session:physics-toy-factory-demo"
 
 
 class AmbiguousStartError(ProductError):
@@ -122,6 +123,8 @@ class S17Client:
             "respond_as": "text",
             "prompt": goal,
             "allowed_side_effects": allowed_side_effects,
+            "budget": self._settings.s17_run_budget_usd,
+            "principal": PRODUCT_BUDGET_PRINCIPAL,
         }
         try:
             response = await self._client.post(

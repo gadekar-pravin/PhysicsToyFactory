@@ -14,6 +14,7 @@ ENV_TO_FIELD = {
     "PTF_PORT": "port",
     "PTF_S17_BASE_URL": "s17_base_url",
     "PTF_S17_CONTROL_TOKEN": "s17_control_token",
+    "PTF_S17_RUN_BUDGET_USD": "s17_run_budget_usd",
     "PTF_WORKSPACE": "workspace",
     "PTF_ARTIFACT_DIR": "artifact_dir",
     "PTF_MAX_PROMPT_CHARS": "max_prompt_chars",
@@ -35,6 +36,7 @@ class Settings(BaseModel):
     port: int = Field(default=8120, ge=1, le=65535)
     s17_base_url: AnyHttpUrl = "http://127.0.0.1:8113"
     s17_control_token: SecretStr
+    s17_run_budget_usd: float = Field(default=0.50, gt=0, allow_inf_nan=False)
     workspace: Path
     artifact_dir: Path
     max_prompt_chars: int = Field(default=4000, ge=1, le=100_000)

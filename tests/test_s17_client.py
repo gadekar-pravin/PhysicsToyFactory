@@ -37,6 +37,8 @@ async def test_start_uses_fixed_scope_exact_authority_and_bearer(settings) -> No
         "respond_as": "text",
         "prompt": "fixed goal",
         "allowed_side_effects": ["edit_code", "run_command"],
+        "budget": 0.50,
+        "principal": "session:physics-toy-factory-demo",
     }
 
 

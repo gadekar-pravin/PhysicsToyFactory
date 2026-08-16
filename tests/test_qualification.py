@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
 import pytest
+from dotenv import load_dotenv
 
 from physics_toy_factory.qualification import (
     REPAIR_AUTHORITY,
@@ -231,6 +233,32 @@ def test_phase6_container_recipe_is_pinned_and_non_root() -> None:
     assert "FROM node:22.20.0-alpine" in dockerfile
     assert "FROM node:latest" not in dockerfile
     assert "USER node" in dockerfile
+
+
+def test_phase6_runbook_blocks_s17_dotenv_root_repopulation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runbook = (Path(__file__).parents[1] / "docs" / "PHASE6_RUNBOOK.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "export S17_SANDBOX_ROOT=" in runbook
+    assert "export S17_SKILLS_DIR=" in runbook
+    assert "unset S17_SANDBOX_ROOT" not in runbook
+    assert "unset S17_SKILLS_DIR" not in runbook
+
+    s17_env = tmp_path / ".env"
+    s17_env.write_text(
+        "S17_SANDBOX_ROOT=/generic/sandbox\nS17_SKILLS_DIR=/generic/skills\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("S17_SANDBOX_ROOT", "")
+    monkeypatch.setenv("S17_SKILLS_DIR", "")
+
+    load_dotenv(s17_env)
+
+    assert os.environ["S17_SANDBOX_ROOT"] == ""
+    assert os.environ["S17_SKILLS_DIR"] == ""
 
 
 @pytest.mark.asyncio
