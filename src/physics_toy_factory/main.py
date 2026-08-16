@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from physics_toy_factory import __version__
 from physics_toy_factory.config import Settings, load_settings
 from physics_toy_factory.errors import ProductError
+from physics_toy_factory.history import HistoryStore
 from physics_toy_factory.models import BrowserErrorBody, PreviewLeaseBody, PromptBody
 from physics_toy_factory.orchestrator import Orchestrator
 from physics_toy_factory.s17_client import S17Client
@@ -74,7 +75,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         report = workspace.ensure_initialized()
-        session = SessionService(reset_required=workspace.reset_required())
+        history = HistoryStore(
+            configured.artifact_dir,
+            max_sketch_bytes=configured.max_sketch_bytes,
+        )
+        session = SessionService(history, reset_required=workspace.reset_required())
         owns_client = http_client is None
         transport = http_client or httpx.AsyncClient(
             timeout=httpx.Timeout(
@@ -89,14 +94,16 @@ def create_app(
         app.state.settings = configured
         app.state.workspace_report = report
         app.state.workspace = workspace
+        app.state.history = history
         app.state.session = session
         app.state.s17 = s17
-        app.state.orchestrator = Orchestrator(configured, workspace, session, s17)
+        app.state.orchestrator = Orchestrator(configured, workspace, session, s17, history)
         try:
             yield
         finally:
             if owns_client:
                 await transport.aclose()
+            history.close()
 
     app = FastAPI(title="Physics Toy Factory", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -222,6 +229,38 @@ def create_app(
     async def get_run(run_id: str, request: Request) -> dict[str, Any]:
         return await request.app.state.orchestrator.get_run(run_id)
 
+    @app.get("/api/history")
+    async def history(
+        request: Request,
+        limit: int = Query(default=20, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=512),
+        q: str = Query(default="", max_length=200),
+    ) -> dict[str, Any]:
+        page = await request.app.state.orchestrator.history_page(
+            limit=limit,
+            cursor=cursor,
+            query=q,
+        )
+        return {"items": page.items, "next_cursor": page.next_cursor, "total": page.total}
+
+    @app.get("/api/history/{history_id}")
+    async def history_detail(history_id: str, request: Request) -> dict[str, Any]:
+        return await request.app.state.orchestrator.history_detail(history_id)
+
+    @app.get("/api/history/{history_id}/code")
+    async def history_code(history_id: str, request: Request) -> dict[str, Any]:
+        result = await request.app.state.orchestrator.history_code(history_id)
+        return result.model_dump(mode="json")
+
+    @app.post("/api/history/{history_id}/preview")
+    async def history_preview(history_id: str, request: Request) -> dict[str, object]:
+        return await request.app.state.orchestrator.prepare_history_preview(history_id)
+
+    @app.delete("/api/history/{history_id}", status_code=204)
+    async def delete_history(history_id: str, request: Request) -> Response:
+        await request.app.state.orchestrator.delete_history(history_id)
+        return Response(status_code=204)
+
     @app.get("/api/runs/{run_id}/events")
     async def events(
         run_id: str,
@@ -282,6 +321,16 @@ def create_app(
         )
         return HTMLResponse(content, headers=_preview_headers(nonce))
 
+    @app.get("/history-preview/{history_id}", include_in_schema=False)
+    async def history_preview_shell(
+        history_id: str, preview_id: str, request: Request
+    ) -> HTMLResponse:
+        content, nonce = await request.app.state.orchestrator.history_preview_shell(
+            history_id=history_id,
+            preview_id=preview_id,
+        )
+        return HTMLResponse(content, headers=_preview_headers(nonce))
+
     @app.get("/api/preview/p5.min.js", include_in_schema=False)
     async def preview_p5(revision: str, preview_id: str, request: Request) -> Response:
         content = await request.app.state.orchestrator.preview_javascript(
@@ -299,6 +348,36 @@ def create_app(
     async def preview_sketch(revision: str, preview_id: str, request: Request) -> Response:
         content = await request.app.state.orchestrator.preview_javascript(
             revision=revision,
+            preview_id=preview_id,
+            asset="sketch.js",
+        )
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers=_javascript_headers(),
+        )
+
+    @app.get("/api/history/{history_id}/preview/p5.min.js", include_in_schema=False)
+    async def history_preview_p5(
+        history_id: str, preview_id: str, request: Request
+    ) -> Response:
+        content = await request.app.state.orchestrator.history_preview_javascript(
+            history_id=history_id,
+            preview_id=preview_id,
+            asset="p5.min.js",
+        )
+        return Response(
+            content,
+            media_type="application/javascript",
+            headers=_javascript_headers(),
+        )
+
+    @app.get("/api/history/{history_id}/preview/sketch.js", include_in_schema=False)
+    async def history_preview_sketch(
+        history_id: str, preview_id: str, request: Request
+    ) -> Response:
+        content = await request.app.state.orchestrator.history_preview_javascript(
+            history_id=history_id,
             preview_id=preview_id,
             asset="sketch.js",
         )

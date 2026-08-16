@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from physics_toy_factory.errors import ProductError, conflict
+from physics_toy_factory.history import ArchivedSketch, HistoryStore
 from physics_toy_factory.models import (
     RunKind,
     RunLink,
@@ -40,10 +41,12 @@ class PreviewBinding:
 class SessionService:
     """Own every read-modify-write operation on the product session."""
 
-    def __init__(self, *, reset_required: bool = False) -> None:
+    def __init__(self, history: HistoryStore, *, reset_required: bool = False) -> None:
         self._lock = asyncio.Lock()
         state = SessionState.RESET_REQUIRED if reset_required else SessionState.EMPTY
-        self._record = SessionRecord(session_id=_new_session_id(), state=state)
+        default = SessionRecord(session_id=_new_session_id(), state=state)
+        self._history = history
+        self._record = history.load_or_create_session(default)
         self._preview: PreviewBinding | None = None
 
     async def snapshot(self) -> SessionRecord:
@@ -101,10 +104,15 @@ class SessionService:
                     self._record.state = SessionState.RESET_REQUIRED
                     if kind is RunKind.FOLLOW_UP:
                         self._record.follow_up_used = True
+                    self._history.save_session(self._record)
                 raise
 
-            if any(link.run_id == run_id for link in self._record.runs):
+            if (
+                any(link.run_id == run_id for link in self._record.runs)
+                or self._history.history_id_for_run(run_id) is not None
+            ):
                 self._record.state = SessionState.RESET_REQUIRED
+                self._history.save_session(self._record)
                 raise ProductError(502, "duplicate_run_id", "S17 returned a duplicate run identifier.")
 
             link = RunLink(
@@ -123,6 +131,12 @@ class SessionService:
             if kind is RunKind.FOLLOW_UP:
                 self._record.follow_up_used = True
                 self._record.current_sketch_sha256 = None
+            try:
+                self._history.add_run(self._record, link)
+            except ProductError:
+                self._record.state = SessionState.RESET_REQUIRED
+                self._record.active_run_id = None
+                raise
             return StartEnvelope(
                 session_id=self._record.session_id,
                 run_id=run_id,
@@ -130,7 +144,22 @@ class SessionService:
                 events_url=f"/api/runs/{run_id}/events",
             )
 
-    async def finish(self, run_id: str, *, ready: bool, sketch_sha256: str | None) -> None:
+    async def observe_graph(self, run_id: str, graph: dict[str, object]) -> None:
+        """Save the latest validated upstream snapshot for an owned running run."""
+
+        async with self._lock:
+            if not any(item.run_id == run_id for item in self._record.runs):
+                raise ProductError(404, "run_not_found", "Run does not belong to this session.")
+            self._history.update_graph(run_id, graph)
+
+    async def finish(
+        self,
+        run_id: str,
+        *,
+        ready: bool,
+        graph: dict[str, object],
+        sketch: ArchivedSketch | None,
+    ) -> None:
         """Apply one terminal graph classification idempotently."""
 
         async with self._lock:
@@ -138,13 +167,14 @@ class SessionService:
             if link is None:
                 raise ProductError(404, "run_not_found", "Run does not belong to this session.")
             if link.outcome is not RunOutcome.RUNNING:
+                self._history.update_graph(run_id, graph)
                 return
             link.finished_at = _now()
             self._record.active_run_id = None
-            if ready and sketch_sha256 is not None:
+            if ready and sketch is not None:
                 link.outcome = RunOutcome.READY
-                link.verified_sketch_sha256 = sketch_sha256
-                self._record.current_sketch_sha256 = sketch_sha256
+                link.verified_sketch_sha256 = sketch.sha256
+                self._record.current_sketch_sha256 = sketch.sha256
                 self._record.state = SessionState.READY
                 self._record.browser_error = None
             else:
@@ -152,6 +182,7 @@ class SessionService:
                 self._record.current_sketch_sha256 = None
                 self._record.state = SessionState.FAILED
             self._preview = None
+            self._history.finish_run(self._record, link, graph, sketch if ready else None)
 
     async def bind_preview(self, *, preview_id: str, revision: str) -> PreviewBinding:
         """Bind a fresh iframe identity to the latest verified run and revision."""
@@ -239,6 +270,7 @@ class SessionService:
             self._record.browser_error = error
             self._record.state = SessionState.FAILED
             self._preview = None
+            self._history.record_browser_error(self._record, run_id, error)
             return self._record.model_copy(deep=True)
 
     async def reset(self, resetter: Callable[[], Awaitable[None]]) -> SessionRecord:
@@ -250,6 +282,7 @@ class SessionService:
             await resetter()
             self._record = SessionRecord(session_id=_new_session_id())
             self._preview = None
+            self._history.save_session(self._record)
             return self._record.model_copy(deep=True)
 
     def _latest_ready_run_id(self) -> str | None:

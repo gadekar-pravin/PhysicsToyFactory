@@ -47,6 +47,8 @@ const elements = {
   followUpCount: document.querySelector("#follow-up-count"),
   followUpButton: document.querySelector("#follow-up-button"),
   followUpError: document.querySelector("#follow-up-error"),
+  savedRuns: document.querySelector("#saved-runs"),
+  savedCount: document.querySelector("#saved-count"),
   viewCode: document.querySelector("#view-code"),
   viewRun: document.querySelector("#view-run"),
   reset: document.querySelector("#reset-session"),
@@ -71,6 +73,13 @@ const elements = {
   runGraphNodes: document.querySelector("#run-graph-nodes"),
   runInspector: document.querySelector("#run-inspector"),
   runContent: document.querySelector("#run-content"),
+  historyDialog: document.querySelector("#history-dialog"),
+  historySearch: document.querySelector("#history-search"),
+  historyQuery: document.querySelector("#history-query"),
+  historyStatus: document.querySelector("#history-status"),
+  historyList: document.querySelector("#history-list"),
+  historyMore: document.querySelector("#history-more"),
+  historyDetail: document.querySelector("#history-detail"),
 };
 
 const state = {
@@ -101,6 +110,14 @@ const state = {
   runSelectedNodeId: null,
   runGraphFrame: null,
   runOrderVisible: false,
+  historyItems: new Map(),
+  historyCursor: null,
+  historyTotal: 0,
+  historySelectedId: null,
+  historyPreviewFrame: null,
+  historyPreviewId: null,
+  historyPreviewWatchdog: null,
+  historyPreviewTerminal: false,
 };
 
 const MODE_COPY = {
@@ -355,6 +372,9 @@ async function failPreview(error, previewState = "error") {
 }
 
 function handlePreviewMessage(event) {
+  if (handleHistoryPreviewMessage(event)) {
+    return;
+  }
   if (!state.previewFrame || event.source !== state.previewFrame.contentWindow) {
     return;
   }
@@ -467,6 +487,415 @@ async function requestJson(url, options = {}) {
     throw error;
   }
   return payload;
+}
+
+function updateSavedCount(total) {
+  const safeTotal = Number.isInteger(total) && total >= 0 ? total : 0;
+  state.historyTotal = safeTotal;
+  elements.savedCount.textContent = safeTotal > 999 ? "999+" : String(safeTotal);
+  elements.savedCount.setAttribute(
+    "aria-label",
+    `${safeTotal} saved ${safeTotal === 1 ? "run" : "runs"}`,
+  );
+}
+
+async function refreshSavedCount() {
+  try {
+    const payload = await requestJson("/api/history?limit=1");
+    updateSavedCount(payload?.total);
+  } catch (_error) {
+    elements.savedCount.textContent = "—";
+    elements.savedCount.setAttribute("aria-label", "Saved run count unavailable");
+  }
+}
+
+function historyOutcomeLabel(outcome) {
+  const labels = {running: "In progress", ready: "Verified", failed: "Stopped"};
+  return labels[outcome] || "Unavailable";
+}
+
+function historyKindLabel(kind) {
+  return kind === "follow_up" ? "Follow-up" : kind === "create" ? "Creation" : "Run";
+}
+
+function historyDate(value) {
+  if (typeof value !== "string") {
+    return "—";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function currentSessionOwnsRun(runId) {
+  return Array.isArray(state.session?.runs)
+    && state.session.runs.some((run) => run?.run_id === runId);
+}
+
+function makeHistoryItem(item) {
+  const row = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "history-item";
+  button.dataset.historyId = item.history_id;
+  button.setAttribute("aria-current", item.history_id === state.historySelectedId ? "true" : "false");
+
+  const head = document.createElement("span");
+  head.className = "history-item-head";
+  head.append(textElement("span", "history-kind", historyKindLabel(item.kind)));
+  const outcome = textElement("span", "history-outcome", historyOutcomeLabel(item.outcome));
+  outcome.dataset.outcome = item.outcome || "unknown";
+  head.append(outcome);
+  button.append(head);
+  button.append(textElement("span", "history-prompt", item.user_prompt || "Prompt unavailable"));
+  const foot = document.createElement("span");
+  foot.className = "history-item-foot";
+  foot.append(textElement("span", "", historyDate(item.started_at)));
+  foot.append(textElement("span", "", compactIdentifier(item.run_id, 14)));
+  button.append(foot);
+  button.addEventListener("click", () => selectHistoryRun(item.history_id));
+  row.append(button);
+  return row;
+}
+
+function renderHistoryList() {
+  clearElement(elements.historyList);
+  const items = Array.from(state.historyItems.values());
+  if (!items.length) {
+    const empty = document.createElement("li");
+    empty.className = "history-empty";
+    empty.append(textElement("p", "panel-kicker", "No saved runs"));
+    empty.append(textElement("p", "", "Future factory runs will be saved here automatically."));
+    elements.historyList.append(empty);
+    return;
+  }
+  for (const item of items) {
+    elements.historyList.append(makeHistoryItem(item));
+  }
+}
+
+function resetHistoryDetail(message = "Select a saved run") {
+  destroyHistoryPreview();
+  clearElement(elements.historyDetail);
+  elements.historyDetail.scrollTop = 0;
+  const empty = document.createElement("div");
+  empty.className = "history-empty";
+  empty.append(textElement("p", "panel-kicker", "Read-only archive"));
+  empty.append(textElement("h3", "", message));
+  empty.append(textElement(
+    "p",
+    "",
+    "Review its prompt, evidence, verified code, and simulation without changing the active workspace.",
+  ));
+  elements.historyDetail.append(empty);
+}
+
+async function loadHistory(reset = false) {
+  if (reset) {
+    state.historyCursor = null;
+    state.historyItems = new Map();
+    state.historySelectedId = null;
+    resetHistoryDetail();
+  }
+  elements.historyStatus.textContent = "Loading saved runs…";
+  elements.historyMore.disabled = true;
+  const params = new URLSearchParams({limit: "20"});
+  const query = elements.historyQuery.value.trim();
+  if (query) {
+    params.set("q", query);
+  }
+  if (state.historyCursor) {
+    params.set("cursor", state.historyCursor);
+  }
+  try {
+    const payload = await requestJson(`/api/history?${params}`);
+    for (const item of Array.isArray(payload?.items) ? payload.items : []) {
+      if (item && typeof item.history_id === "string") {
+        state.historyItems.set(item.history_id, item);
+      }
+    }
+    state.historyCursor = typeof payload?.next_cursor === "string" ? payload.next_cursor : null;
+    elements.historyMore.hidden = !state.historyCursor;
+    elements.historyMore.disabled = false;
+    renderHistoryList();
+    const shown = state.historyItems.size;
+    const total = Number.isInteger(payload?.total) ? payload.total : shown;
+    elements.historyStatus.textContent = query
+      ? `${total} matching saved ${total === 1 ? "run" : "runs"}`
+      : `${total} saved ${total === 1 ? "run" : "runs"} · local archive`;
+    if (!query) {
+      updateSavedCount(total);
+    }
+    if (reset && shown > 0) {
+      await selectHistoryRun(state.historyItems.keys().next().value);
+    }
+  } catch (error) {
+    elements.historyStatus.textContent = error.message || "Saved runs could not be loaded.";
+    elements.historyMore.hidden = true;
+    renderHistoryList();
+  }
+}
+
+function appendHistoryFact(parent, label, value) {
+  const fact = document.createElement("div");
+  fact.className = "history-fact";
+  fact.append(textElement("dt", "", label));
+  fact.append(textElement("dd", "", value ?? "—"));
+  parent.append(fact);
+}
+
+function openHistoricalEvidence(detail) {
+  const graph = detail?.graph;
+  if (!graph || typeof graph !== "object") {
+    return;
+  }
+  elements.historyDialog.close();
+  state.runSelectedNodeId = null;
+  setRunOrderVisible(false);
+  setRunTab("overview");
+  renderRunEvidence(graph);
+  elements.runDialog.showModal();
+}
+
+async function openHistoricalCode(historyId) {
+  elements.historyStatus.textContent = "Loading archived sketch.js…";
+  try {
+    const code = await requestJson(`/api/history/${encodeURIComponent(historyId)}/code`);
+    elements.historyDialog.close();
+    elements.codeMeta.textContent = `${code.bytes} bytes · sha256 ${code.sha256} · saved verified revision`;
+    elements.codeContent.textContent = code.content;
+    elements.codeDialog.showModal();
+  } catch (error) {
+    elements.historyStatus.textContent = error.message || "Archived source could not be loaded.";
+  }
+}
+
+function destroyHistoryPreview() {
+  if (state.historyPreviewWatchdog !== null) {
+    window.clearTimeout(state.historyPreviewWatchdog);
+  }
+  state.historyPreviewWatchdog = null;
+  state.historyPreviewFrame?.remove();
+  state.historyPreviewFrame = null;
+  state.historyPreviewId = null;
+  state.historyPreviewTerminal = false;
+}
+
+function setHistoryPreviewMessage(message) {
+  const element = elements.historyDetail.querySelector(".history-preview-message");
+  if (element) {
+    element.textContent = message;
+    element.hidden = !message;
+  }
+}
+
+function stopHistoryPreview(message) {
+  if (state.historyPreviewTerminal) {
+    return;
+  }
+  state.historyPreviewTerminal = true;
+  if (state.historyPreviewWatchdog !== null) {
+    window.clearTimeout(state.historyPreviewWatchdog);
+    state.historyPreviewWatchdog = null;
+  }
+  state.historyPreviewFrame?.remove();
+  state.historyPreviewFrame = null;
+  setHistoryPreviewMessage(message);
+}
+
+async function mountHistoryPreview(historyId) {
+  destroyHistoryPreview();
+  const host = elements.historyDetail.querySelector(".history-preview");
+  if (!host) {
+    return;
+  }
+  setHistoryPreviewMessage("Opening saved verified preview…");
+  try {
+    const lease = await requestJson(`/api/history/${encodeURIComponent(historyId)}/preview`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (
+      !lease
+      || lease.history_id !== historyId
+      || typeof lease.preview_id !== "string"
+      || typeof lease.revision !== "string"
+      || typeof lease.url !== "string"
+      || !Number.isInteger(lease.ready_timeout_ms)
+      || lease.ready_timeout_ms < 1
+    ) {
+      throw new Error("The saved preview lease response was invalid.");
+    }
+    state.historyPreviewId = lease.preview_id;
+    state.historyPreviewTerminal = false;
+    const frame = document.createElement("iframe");
+    frame.title = "Saved verified physics toy preview";
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.referrerPolicy = "no-referrer";
+    state.historyPreviewFrame = frame;
+    host.prepend(frame);
+    state.historyPreviewWatchdog = window.setTimeout(() => {
+      stopHistoryPreview("Saved preview did not become responsive.");
+    }, lease.ready_timeout_ms);
+    frame.src = lease.url;
+  } catch (error) {
+    stopHistoryPreview(error.message || "The saved preview could not be opened.");
+  }
+}
+
+function handleHistoryPreviewMessage(event) {
+  if (!state.historyPreviewFrame || event.source !== state.historyPreviewFrame.contentWindow) {
+    return false;
+  }
+  const value = event.data;
+  const ready = exactKeys(value, ["type", "preview_id"])
+    && value.type === "preview_ready"
+    && value.preview_id === state.historyPreviewId;
+  const failed = exactKeys(value, ["type", "preview_id", "name", "message", "line", "column"])
+    && value.type === "preview_error"
+    && value.preview_id === state.historyPreviewId
+    && typeof value.name === "string"
+    && typeof value.message === "string";
+  if ((!ready && !failed) || state.historyPreviewTerminal) {
+    return true;
+  }
+  if (ready) {
+    if (state.historyPreviewWatchdog !== null) {
+      window.clearTimeout(state.historyPreviewWatchdog);
+      state.historyPreviewWatchdog = null;
+    }
+    setHistoryPreviewMessage("");
+  } else {
+    stopHistoryPreview(`Saved preview stopped: ${boundedDetail(`${value.name}: ${value.message}`)}`);
+  }
+  return true;
+}
+
+async function deleteHistoryRun(item) {
+  const confirmed = window.confirm(
+    "Delete this saved run and its local archived sketch? The upstream S17 journal will be retained.",
+  );
+  if (!confirmed) {
+    return;
+  }
+  elements.historyStatus.textContent = "Deleting saved run…";
+  try {
+    await requestJson(`/api/history/${encodeURIComponent(item.history_id)}`, {method: "DELETE"});
+    state.historyItems.delete(item.history_id);
+    state.historySelectedId = null;
+    resetHistoryDetail();
+    await loadHistory(true);
+    await refreshSavedCount();
+  } catch (error) {
+    elements.historyStatus.textContent = error.message || "The saved run could not be deleted.";
+  }
+}
+
+function renderHistoryDetail(detail) {
+  destroyHistoryPreview();
+  const item = detail.history;
+  clearElement(elements.historyDetail);
+  elements.historyDetail.scrollTop = 0;
+  const content = document.createElement("div");
+  content.className = "history-detail-content";
+  const head = document.createElement("div");
+  head.className = "history-detail-head";
+  const title = document.createElement("div");
+  title.append(textElement("p", "panel-kicker", `${historyKindLabel(item.kind)} · read only`));
+  title.append(textElement("h3", "", historyOutcomeLabel(item.outcome)));
+  head.append(title);
+  const outcome = textElement("span", "history-outcome", historyOutcomeLabel(item.outcome));
+  outcome.dataset.outcome = item.outcome || "unknown";
+  head.append(outcome);
+  content.append(head);
+  content.append(textElement("p", "history-detail-run", item.run_id || "Run ID unavailable"));
+  content.append(textElement("p", "history-detail-prompt", item.user_prompt || "Prompt unavailable"));
+
+  const facts = document.createElement("dl");
+  facts.className = "history-facts";
+  appendHistoryFact(facts, "Started", historyDate(item.started_at));
+  appendHistoryFact(facts, "Finished", historyDate(item.finished_at));
+  appendHistoryFact(facts, "Revision", compactIdentifier(item.verified_sketch_sha256, 16));
+  appendHistoryFact(facts, "Parent run", compactIdentifier(item.parent_run_id, 16));
+  content.append(facts);
+
+  const actions = document.createElement("div");
+  actions.className = "history-actions";
+  const preview = textElement("button", "button button-quiet", "Preview");
+  preview.type = "button";
+  preview.disabled = item.preview_available !== true;
+  preview.addEventListener("click", () => mountHistoryPreview(item.history_id));
+  const evidence = textElement("button", "button button-quiet", "View evidence");
+  evidence.type = "button";
+  evidence.disabled = !detail.graph;
+  evidence.addEventListener("click", () => openHistoricalEvidence(detail));
+  const code = textElement("button", "button button-quiet", "View code");
+  code.type = "button";
+  code.disabled = item.preview_available !== true;
+  code.addEventListener("click", () => openHistoricalCode(item.history_id));
+  const remove = textElement("button", "button button-quiet history-delete", "Delete");
+  remove.type = "button";
+  const current = currentSessionOwnsRun(item.run_id);
+  remove.disabled = current;
+  remove.title = current ? "Reset the current factory session before deleting this run." : "";
+  remove.addEventListener("click", () => deleteHistoryRun(item));
+  actions.append(preview, evidence, code, remove);
+  content.append(actions);
+
+  if (item.preview_available) {
+    const previewHost = document.createElement("div");
+    previewHost.className = "history-preview";
+    previewHost.append(textElement("p", "history-preview-message", "Select Preview to open the saved verified simulation."));
+    content.append(previewHost);
+  }
+  if (detail.degraded) {
+    content.append(textElement(
+      "p",
+      "history-warning",
+      `${detail.degraded.message || "Live run data is unavailable."} Showing the last saved evidence.`,
+    ));
+  }
+  if (item.browser_error) {
+    content.append(textElement(
+      "p",
+      "history-warning",
+      "A browser runtime error was recorded for this verified revision.",
+    ));
+  }
+  elements.historyDetail.append(content);
+}
+
+async function selectHistoryRun(historyId) {
+  if (typeof historyId !== "string") {
+    return;
+  }
+  state.historySelectedId = historyId;
+  renderHistoryList();
+  resetHistoryDetail("Loading saved run…");
+  try {
+    const detail = await requestJson(`/api/history/${encodeURIComponent(historyId)}`);
+    if (state.historySelectedId !== historyId) {
+      return;
+    }
+    if (detail?.history && typeof detail.history === "object") {
+      state.historyItems.set(historyId, detail.history);
+    }
+    renderHistoryList();
+    renderHistoryDetail(detail);
+  } catch (error) {
+    resetHistoryDetail(error.message || "The saved run could not be loaded.");
+  }
+}
+
+async function openHistoryDialog() {
+  elements.historyQuery.value = "";
+  elements.historyDialog.showModal();
+  await loadHistory(true);
 }
 
 function renderSuggestions(suggestions) {
@@ -1810,6 +2239,7 @@ async function startCreate(event) {
       state: "running",
       active_run_id: payload.run_id,
     };
+    void refreshSavedCount();
     resetRunState(payload.run_id, "create");
     connectRun(payload.run_id, "create");
   } catch (error) {
@@ -1852,6 +2282,7 @@ async function startFollowUp(event) {
       current_sketch_sha256: null,
       follow_up_used: true,
     };
+    void refreshSavedCount();
     resetRunState(payload.run_id, "follow_up");
     connectRun(payload.run_id, "follow_up");
   } catch (error) {
@@ -1968,6 +2399,7 @@ function latestRun(session) {
 
 async function boot() {
   setMode("connecting");
+  void refreshSavedCount();
   try {
     const [sessionPayload, health] = await Promise.all([
       requestJson("/api/session"),
@@ -2006,9 +2438,18 @@ elements.form.addEventListener("submit", startCreate);
 elements.prompt.addEventListener("input", updatePromptCount);
 elements.followUpForm.addEventListener("submit", startFollowUp);
 elements.followUpPrompt.addEventListener("input", updateFollowUpCount);
+elements.savedRuns.addEventListener("click", openHistoryDialog);
 elements.viewCode.addEventListener("click", openCodeDialog);
 elements.viewRun.addEventListener("click", openRunDialog);
 elements.reset.addEventListener("click", resetSession);
+elements.historySearch.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadHistory(true);
+});
+elements.historyMore.addEventListener("click", () => {
+  void loadHistory(false);
+});
+elements.historyDialog.addEventListener("close", destroyHistoryPreview);
 elements.runOrderToggle.addEventListener("change", () => {
   setRunOrderVisible(elements.runOrderToggle.checked);
 });
@@ -2047,6 +2488,7 @@ window.addEventListener("resize", scheduleRunGraphEdges);
 window.addEventListener("pagehide", () => {
   state.eventSource?.close();
   destroyPreview();
+  destroyHistoryPreview();
 });
 
 updatePromptCount();

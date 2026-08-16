@@ -24,6 +24,11 @@
         </a>
         <p class="header-run-status" id="header-run-status" aria-live="polite" hidden></p>
         <nav class="header-actions" aria-label="Workspace actions">
+          <button class="button button-quiet" id="saved-runs" type="button">
+            <span class="history-button-full">Saved runs</span>
+            <span class="history-button-short" hidden>Saved</span>
+            <span class="saved-count" id="saved-count" aria-label="0 saved runs">0</span>
+          </button>
           <button class="button button-quiet" id="view-code" type="button" disabled>
             View code
           </button>
@@ -216,6 +221,43 @@
         <span>One active session · local workspace</span>
       </footer>
     </div>
+
+    <dialog class="data-dialog history-dialog" id="history-dialog" aria-labelledby="history-dialog-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="panel-kicker">Local run archive</p>
+          <h2 id="history-dialog-title">Saved runs</h2>
+        </div>
+        <button class="dialog-close" type="button" data-close-dialog aria-label="Close saved runs">×</button>
+      </div>
+      <form class="history-search" id="history-search" role="search">
+        <label class="sr-only" for="history-query">Search saved prompts or run IDs</label>
+        <input
+          id="history-query"
+          type="search"
+          maxlength="200"
+          placeholder="Search prompts or run IDs"
+          autocomplete="off"
+        >
+        <button class="button button-quiet" type="submit">Search</button>
+      </form>
+      <p class="history-status" id="history-status" role="status" aria-live="polite"></p>
+      <div class="history-workspace">
+        <aside class="history-browser" aria-label="Saved run list">
+          <ol class="history-list" id="history-list"></ol>
+          <button class="button button-quiet history-more" id="history-more" type="button" hidden>
+            Load more
+          </button>
+        </aside>
+        <section class="history-detail" id="history-detail" aria-live="polite">
+          <div class="history-empty">
+            <p class="panel-kicker">Read-only archive</p>
+            <h3>Select a saved run</h3>
+            <p>Review its prompt, evidence, verified code, and simulation without changing the active workspace.</p>
+          </div>
+        </section>
+      </div>
+    </dialog>
 
     <dialog class="data-dialog" id="code-dialog" aria-labelledby="code-dialog-title">
       <div class="dialog-heading">
