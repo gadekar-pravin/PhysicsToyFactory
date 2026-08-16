@@ -232,13 +232,88 @@
     <dialog class="data-dialog run-dialog" id="run-dialog" aria-labelledby="run-dialog-title">
       <div class="dialog-heading">
         <div>
-          <p class="panel-kicker">Unfiltered evidence</p>
-          <h2 id="run-dialog-title">Raw run graph</h2>
+          <p class="panel-kicker">Run evidence</p>
+          <h2 id="run-dialog-title">Run evidence viewer</h2>
         </div>
         <button class="dialog-close" type="button" data-close-dialog aria-label="Close run dialog">×</button>
       </div>
       <div class="code-meta" id="run-meta"></div>
-      <pre><code id="run-content"></code></pre>
+      <div class="run-tabs" role="tablist" aria-label="Run evidence views">
+        <button
+          class="run-tab"
+          id="run-tab-overview"
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="run-panel-overview"
+          data-run-tab="overview"
+        >Overview</button>
+        <button
+          class="run-tab"
+          id="run-tab-graph"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="run-panel-graph"
+          data-run-tab="graph"
+          tabindex="-1"
+        >Graph</button>
+        <button
+          class="run-tab"
+          id="run-tab-raw"
+          type="button"
+          role="tab"
+          aria-selected="false"
+          aria-controls="run-panel-raw"
+          data-run-tab="raw"
+          tabindex="-1"
+        >Raw JSON</button>
+      </div>
+
+      <section
+        class="run-panel run-overview-panel"
+        id="run-panel-overview"
+        role="tabpanel"
+        aria-labelledby="run-tab-overview"
+        tabindex="0"
+      >
+        <div class="run-overview" id="run-overview" aria-live="polite"></div>
+      </section>
+
+      <section
+        class="run-panel run-graph-panel"
+        id="run-panel-graph"
+        role="tabpanel"
+        aria-labelledby="run-tab-graph"
+        tabindex="0"
+        hidden
+      >
+        <p class="run-graph-note" id="run-graph-note">
+          Connectors reflect edges reported by S17. Node position is arranged only for readability.
+        </p>
+        <div class="run-graph-layout">
+          <div class="run-graph-scroll" id="run-graph-scroll" tabindex="0" aria-label="Run graph canvas">
+            <div class="run-graph-canvas" id="run-graph-canvas">
+              <svg class="run-graph-edges" id="run-graph-edges" aria-hidden="true"></svg>
+              <div class="run-graph-nodes" id="run-graph-nodes"></div>
+            </div>
+          </div>
+          <aside class="run-inspector" id="run-inspector" aria-live="polite">
+            <p class="empty-evidence">Select a graph node to inspect its evidence.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section
+        class="run-panel run-raw-panel"
+        id="run-panel-raw"
+        role="tabpanel"
+        aria-labelledby="run-tab-raw"
+        tabindex="0"
+        hidden
+      >
+        <pre><code id="run-content"></code></pre>
+      </section>
     </dialog>
 
     <script src="/static/app.js" defer></script>
