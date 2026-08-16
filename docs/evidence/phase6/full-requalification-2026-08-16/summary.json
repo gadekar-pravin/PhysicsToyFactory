@@ -1,0 +1,159 @@
+{
+  "browser_observation": {
+    "checks": [
+      "ready preview state",
+      "sandboxed iframe visible",
+      "canvas visible and responsive to pointer movement",
+      "no product system-error banner"
+    ],
+    "outcome": "passed",
+    "recorded_at": "2026-08-16T09:10:44Z",
+    "screenshot": "final-linked-preview.png",
+    "screenshot_sha256": "6e02ffa515bc76a972472fdde5077b8037af38f962945ee1e28552673d92a71c"
+  },
+  "evidence_kind": "live_product_qualification",
+  "outcome": "passed",
+  "recorded_at": "2026-08-16T09:08:45Z",
+  "scenario_count": 6,
+  "scenarios": [
+    {
+      "event_tape_name": "suggestion-1-rain-that-avoids-my-mouse.events.jsonl",
+      "event_tape_sha256": "8d2970db967b858ddf5cb74df666865f1c73c0b997f3c002f3f7402836d618ad",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_1"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "suggestion-1-rain-that-avoids-my-mouse",
+      "outcome": "ready",
+      "prompt": "Rain that avoids my mouse",
+      "raw_graph_name": "suggestion-1-rain-that-avoids-my-mouse.graph.json",
+      "raw_graph_sha256": "a981fdb7bce98792ce8d8b15083f1fc4d9876c38a60466ce60a3708010fd2769",
+      "reason": "ready",
+      "run_id": "run-13fd7410c11d",
+      "sketch_sha256": "8ae4053df331ca06a0fff77af39a06abb9978eae0e6134768c733c45a46eb48c"
+    },
+    {
+      "event_tape_name": "suggestion-2-bouncy-magnets.events.jsonl",
+      "event_tape_sha256": "4f66499096c230f943488f9d0cdbe2c05c5167ad78f8b5acf3e6ef18d6ab842b",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_2"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "suggestion-2-bouncy-magnets",
+      "outcome": "ready",
+      "prompt": "Bouncy magnets",
+      "raw_graph_name": "suggestion-2-bouncy-magnets.graph.json",
+      "raw_graph_sha256": "90e7717705f3cb26ccf934f6c25bb58a42b2d9da96582569ff2a2cdf321b936f",
+      "reason": "ready",
+      "run_id": "run-f0bf3f8a7f50",
+      "sketch_sha256": "6f1e861687a131915e5e529c278ab643b567cb73855c2a0598da7b3fa2eda470"
+    },
+    {
+      "event_tape_name": "suggestion-3-angry-solar-system.events.jsonl",
+      "event_tape_sha256": "1641f1c93a70ee53a851779642cc5642d958069604d4031216f6c3e12f45fd6b",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_1"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "suggestion-3-angry-solar-system",
+      "outcome": "ready",
+      "prompt": "Angry solar system",
+      "raw_graph_name": "suggestion-3-angry-solar-system.graph.json",
+      "raw_graph_sha256": "490ae0492f4ac8bb82589195c32942a3843765844e4cef17e4e23c71aab5629f",
+      "reason": "ready",
+      "run_id": "run-221f5bd6bfaf",
+      "sketch_sha256": "2bfe5a1e68e1ff9d794de02befecd1e687e88c16598e4f895b90f90f8226ed24"
+    },
+    {
+      "event_tape_name": "suggestion-4-fish-that-follow-my-cursor.events.jsonl",
+      "event_tape_sha256": "24590d80931e540d28f9378d2d7ab9f8320904f05c29969c842fd30fe5d67bab",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_2"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "suggestion-4-fish-that-follow-my-cursor",
+      "outcome": "ready",
+      "prompt": "Fish that follow my cursor",
+      "raw_graph_name": "suggestion-4-fish-that-follow-my-cursor.graph.json",
+      "raw_graph_sha256": "0e5b65204e18643f4f8c4a5c3f8f4381b291bfe3a1878b2d5999670678b796a6",
+      "reason": "ready",
+      "run_id": "run-132fb4549496",
+      "sketch_sha256": "e16860dbc4e23ffa38e9b8620bbd22ae101d8541154893d75a1ce1d592e06866"
+    },
+    {
+      "event_tape_name": "demo-create-tiny-solar-system.events.jsonl",
+      "event_tape_sha256": "3731c736105a77bce32a604897c6f22138cf29f5d9116e5d009712b6134b22d7",
+      "kind": "create",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_1"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "demo-create-tiny-solar-system",
+      "outcome": "ready",
+      "prompt": "Create a tiny solar system.",
+      "raw_graph_name": "demo-create-tiny-solar-system.graph.json",
+      "raw_graph_sha256": "4589ed3b4631f58d24e0f059ba8e7bf5b439e6c9229d46e3491865c4eedd1230",
+      "reason": "ready",
+      "run_id": "run-5578e66df13b",
+      "sketch_sha256": "5639baa4acf343914ec3765c25adb94a3db991b696a874f8f741f9adc8faf24d"
+    },
+    {
+      "event_tape_name": "demo-follow-up-glowing-trails.events.jsonl",
+      "event_tape_sha256": "08a95416d4bad7935d2b8e8762e7e75a9130ab753caf9a8ef7cb7911c67966f1",
+      "kind": "follow_up",
+      "model_routes": [
+        {
+          "model": "gemini-3.5-flash-lite",
+          "provider": "gemini_2"
+        },
+        {
+          "model": "google/gemini-3.7-flash",
+          "provider": "openrouter"
+        }
+      ],
+      "name": "demo-follow-up-glowing-trails",
+      "outcome": "ready",
+      "prompt": "Make the planets leave glowing trails.",
+      "raw_graph_name": "demo-follow-up-glowing-trails.graph.json",
+      "raw_graph_sha256": "59b2c6cba2da1d9da83f0a8052843fb3c08c6291f7e6d3325c1e3137706c6d78",
+      "reason": "ready",
+      "run_id": "run-ddb203fdabda",
+      "sketch_sha256": "63af056215249c0aa0d32068c0be5227371e8d8e42c5be1e672c16e48bcc9c0f"
+    }
+  ],
+  "schema_version": 1
+}

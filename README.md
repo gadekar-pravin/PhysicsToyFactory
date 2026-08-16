@@ -156,8 +156,8 @@ does not converge; it never turns a first-attempt pass or fabricated event into 
 
 The retained 2026-08-15 evidence records a passed genuine repair proof but a failed product
 qualification: all five create graphs finished without `answer_with_evidence`, the linked follow-up
-was therefore rejected with HTTP 409, and no verified preview screenshot was captured. Deterministic
-tests are green, but the live Phase 6 release gate and the MVP qualification remain incomplete.
+was therefore rejected with HTTP 409, and no verified preview screenshot was captured. This remains
+preserved as the historical pre-remediation result rather than being overwritten.
 
 Product runs include the validated `PTF_S17_RUN_BUDGET_USD` ceiling (default `$0.50`) and a stable
 demo principal. This keeps creation and follow-up on S17's configured, metered model ladder rather
@@ -165,8 +165,14 @@ than its unbudgeted gateway default.
 
 The separately authorized 2026-08-16 solar canary passed on that corrected profile: one budgeted run
 produced a passing container checker, succeeded `answer_with_evidence`, verified interactive preview,
-and retained screenshot. The full release gate remains incomplete until the four suggested prompts
-and linked follow-up are rerun successfully.
+and retained screenshot.
+
+The subsequently authorized full 2026-08-16 requalification also passed without retries. All four
+suggested prompts, the exact solar create, and its linked glowing-trails follow-up reached verified
+ready previews with passing container checkers and succeeded `answer_with_evidence` nodes. The final
+linked preview passed real-browser observation. The Phase 6 live release gate and specified MVP
+qualification are therefore complete; reviewed artifacts are retained under
+`docs/evidence/phase6/full-requalification-2026-08-16/`.
 
 ## Trusted fixture
 

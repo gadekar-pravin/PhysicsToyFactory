@@ -1,0 +1,571 @@
+{
+  "edges": [
+    [
+      "create_sketch",
+      "run_checker"
+    ],
+    [
+      "run_checker",
+      "final_answer"
+    ]
+  ],
+  "events": [
+    {
+      "kind": "run_started",
+      "node_id": null,
+      "payload": {},
+      "sequence": 1
+    },
+    {
+      "kind": "graph_patched",
+      "node_id": null,
+      "payload": {
+        "add": [
+          "read_api_doc"
+        ],
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.5,
+            "ladder_steps": 0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_1",
+            "pressure": 0.0,
+            "projected_cost": 0.00898725,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.5,
+            "requested_tier": "frontier",
+            "tier": "frontier"
+          }
+        ],
+        "cancel": [],
+        "connect": [],
+        "finish": false,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.00252825,
+            "budget_remaining": 0.498735875,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.001264125,
+            "decision": "proceed",
+            "input_tokens": 2606,
+            "latency_ms": 2811.0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_1",
+            "output_tokens": 153,
+            "projected_cost": 0.00898725,
+            "provider": "openrouter",
+            "reasoning": "off",
+            "requested_model": "google/gemini-3.7-flash",
+            "requested_tier": "frontier",
+            "role": "planner",
+            "sequence": 1,
+            "started_at": 1786870933.258386,
+            "tier": "frontier"
+          }
+        ],
+        "reason": "Read P5_API.md to check supported functions, rules, and constraints for the p5.js sketch.",
+        "resume": [],
+        "trigger_event": 1,
+        "wait": []
+      },
+      "sequence": 2
+    },
+    {
+      "kind": "task_started",
+      "node_id": "read_api_doc",
+      "payload": {
+        "agent": "read_code",
+        "skill": "read_code"
+      },
+      "sequence": 3
+    },
+    {
+      "kind": "task_succeeded",
+      "node_id": "read_api_doc",
+      "payload": {
+        "budget_decisions": [],
+        "end_line": 85,
+        "metered_calls": [],
+        "path": "P5_API.md",
+        "start_line": 1,
+        "text": "     1  # Physics Toy Factory p5 API\n     2  \n     3  This is the complete p5.js surface accepted by `p5check.js`. Generated `sketch.js` files must use\n     4  global mode, define `setup()` and `draw()`, call `createCanvas()`, and perform at least one visible draw\n     5  call. APIs not listed here are unsupported. Asset loading, networking, storage, DOM access, audio,\n     6  video, WebGL, shaders, offscreen graphics, and dynamic code generation are forbidden.\n     7  \n     8  The checker is a bounded smoke judge, not a visual or semantic grader. It runs `setup()` once,\n     9  `draw()` for five deterministic frames, and each defined input callback once.\n    10  \n    11  ## Lifecycle callbacks\n    12  \n    13  `setup`, `draw`, `windowResized`, `mousePressed`, `mouseReleased`, `mouseMoved`, `mouseDragged`,\n    14  `keyPressed`, `keyReleased`\n    15  \n    16  ## Canvas and environment\n    17  \n    18  Functions: `createCanvas`, `resizeCanvas`, `frameRate`, `millis`\n    19  \n    20  Values: `width`, `height`, `windowWidth`, `windowHeight`, `frameCount`, `deltaTime`\n    21  \n    22  ## Input\n    23  \n    24  `mouseX`, `mouseY`, `pmouseX`, `pmouseY`, `mouseIsPressed`, `key`, `keyCode`, `keyIsPressed`\n    25  \n    26  ## 2D drawing\n    27  \n    28  `background`, `clear`, `point`, `line`, `triangle`, `quad`, `rect`, `square`, `ellipse`, `circle`,\n    29  `arc`, `bezier`, `curve`\n    30  \n    31  ## Shapes\n    32  \n    33  `beginShape`, `vertex`, `curveVertex`, `bezierVertex`, `endShape`\n    34  \n    35  ## Style\n    36  \n    37  `fill`, `noFill`, `stroke`, `noStroke`, `strokeWeight`, `strokeCap`, `strokeJoin`, `colorMode`,\n    38  `rectMode`, `ellipseMode`, `blendMode`\n    39  \n    40  ## Text\n    41  \n    42  `text`, `textSize`, `textAlign`\n    43  \n    44  ## Transform\n    45  \n    46  `push`, `pop`, `translate`, `rotate`, `scale`, `angleMode`\n    47  \n    48  ## Color\n    49  \n    50  `color`, `red`, `green`, `blue`, `alpha`, `lerpColor`\n    51  \n    52  ## Random and noise\n    53  \n    54  `random`, `randomSeed`, `noise`, `noiseDetail`, `noiseSeed`\n    55  \n    56  Randomness and input values are deterministic inside the checker. The browser uses p5.js normally.\n    57  \n    58  ## Math\n    59  \n    60  `abs`, `ceil`, `constrain`, `dist`, `exp`, `floor`, `lerp`, `log`, `mag`, `map`, `max`, `min`,\n    61  `norm`, `pow`, `round`, `sq`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`,\n    62  `degrees`, `radians`\n    63  \n    64  ## Constants\n    65  \n    66  `PI`, `TWO_PI`, `HALF_PI`, `QUARTER_PI`, `TAU`, `CENTER`, `CORNER`, `CORNERS`, `RADIUS`, `CLOSE`,\n    67  `OPEN`, `CHORD`, `PIE`, `RGB`, `HSB`, `HSL`, `DEGREES`, `RADIANS`, `ADD`, `BLEND`, `ROUND`,\n    68  `SQUARE`, `PROJECT`, `MITER`, `BEVEL`\n    69  \n    70  ## Vectors\n    71  \n    72  Create a vector with `createVector` as `createVector(x, y)`. Instance methods are `set`, `copy`, `add`, `sub`, `mult`,\n    73  `div`, `mag`, `magSq`, `normalize`, `setMag`, `limit`, `heading`, `rotate`, `dot`, `dist`, and `lerp`.\n    74  \n    75  Static methods are `p5.Vector.add`, `p5.Vector.sub`, `p5.Vector.mult`, `p5.Vector.div`,\n    76  `p5.Vector.dist`, `p5.Vector.lerp`, `p5.Vector.fromAngle`, and `p5.Vector.random2D`.\n    77  \n    78  ## Explicitly unsupported examples\n    79  \n    80  The checker reports `Unsupported p5 API: <name>` for recognized APIs outside this product contract,\n    81  including `loadImage`, `loadJSON`, `loadSound`, `createVideo`, `createElement`, `createGraphics`,\n    82  `WEBGL`, `WEBGPU`, `shader`, `loadShader`, `createCapture`, and `createAudio`.\n    83  \n    84  Misspellings and all other unknown identifiers remain undefined and fail normally. The checker never\n    85  turns unknown calls into no-ops.",
+        "total_lines": 85,
+        "truncated": false
+      },
+      "sequence": 4
+    },
+    {
+      "kind": "graph_patched",
+      "node_id": null,
+      "payload": {
+        "add": [
+          "create_sketch"
+        ],
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.498735875,
+            "ladder_steps": 0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_2",
+            "pressure": 0.00252825,
+            "projected_cost": 0.009934125,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.498735875,
+            "requested_tier": "frontier",
+            "tier": "frontier"
+          }
+        ],
+        "cancel": [],
+        "connect": [],
+        "finish": false,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.015,
+            "budget_remaining": 0.4925,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.006235875,
+            "decision": "proceed",
+            "input_tokens": 5489,
+            "latency_ms": 11919.0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_2",
+            "output_tokens": 2228,
+            "projected_cost": 0.009934125,
+            "provider": "openrouter",
+            "reasoning": "off",
+            "requested_model": "google/gemini-3.7-flash",
+            "requested_tier": "frontier",
+            "role": "planner",
+            "sequence": 2,
+            "started_at": 1786870936.118196,
+            "tier": "frontier"
+          }
+        ],
+        "reason": "launched runnable frontier; held future tasks run_checker until outcomes land",
+        "resume": [],
+        "trigger_event": 4,
+        "wait": []
+      },
+      "sequence": 5
+    },
+    {
+      "kind": "task_started",
+      "node_id": "create_sketch",
+      "payload": {
+        "agent": "create_file",
+        "skill": "create_file"
+      },
+      "sequence": 6
+    },
+    {
+      "kind": "task_succeeded",
+      "node_id": "create_sketch",
+      "payload": {
+        "budget_decisions": [],
+        "bytes": 2773,
+        "created": true,
+        "metered_calls": [],
+        "path": "sketch.js"
+      },
+      "sequence": 7
+    },
+    {
+      "kind": "graph_patched",
+      "node_id": null,
+      "payload": {
+        "add": [
+          "run_checker"
+        ],
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.4925,
+            "ladder_steps": 0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_3",
+            "pressure": 0.015,
+            "projected_cost": 0.009846,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.4925,
+            "requested_tier": "frontier",
+            "tier": "frontier"
+          }
+        ],
+        "cancel": [],
+        "connect": [
+          [
+            "create_sketch",
+            "run_checker"
+          ]
+        ],
+        "finish": false,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.019611,
+            "budget_remaining": 0.4901945,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.0023055,
+            "decision": "proceed",
+            "input_tokens": 5393,
+            "latency_ms": 2420.0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_3",
+            "output_tokens": 151,
+            "projected_cost": 0.009846,
+            "provider": "openrouter",
+            "reasoning": "off",
+            "requested_model": "google/gemini-3.7-flash",
+            "requested_tier": "frontier",
+            "role": "planner",
+            "sequence": 3,
+            "started_at": 1786870948.0524569,
+            "tier": "frontier"
+          }
+        ],
+        "reason": "Run the checker tool against the newly created sketch.js.",
+        "resume": [],
+        "trigger_event": 7,
+        "wait": []
+      },
+      "sequence": 8
+    },
+    {
+      "kind": "task_started",
+      "node_id": "run_checker",
+      "payload": {
+        "agent": "run_command",
+        "skill": "run_command"
+      },
+      "sequence": 9
+    },
+    {
+      "kind": "task_succeeded",
+      "node_id": "run_checker",
+      "payload": {
+        "budget_decisions": [],
+        "command": "docker run --rm --network=none --memory=1g --cpus=1 --pids-limit=256 -v <PTF_WORKSPACE>:/workspace -w /workspace physics-toy-factory-node:22.20.0-phase6 node p5check.js sketch.js",
+        "duration_seconds": 0.334,
+        "exit_code": 0,
+        "metered_calls": [],
+        "ok": true,
+        "stderr": "",
+        "stdout": "P5CHECK PASS frames=5 draw_calls=1845\n",
+        "timed_out": false
+      },
+      "sequence": 10
+    },
+    {
+      "kind": "graph_patched",
+      "node_id": null,
+      "payload": {
+        "add": [
+          "final_answer"
+        ],
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.4901945,
+            "ladder_steps": 0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_4",
+            "pressure": 0.019611,
+            "projected_cost": 0.0099525,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.4901945,
+            "requested_tier": "frontier",
+            "tier": "frontier"
+          },
+          {
+            "action": "proceed",
+            "allowance": 0.4875035,
+            "ladder_steps": 0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_5",
+            "pressure": 0.024993,
+            "projected_cost": 0.0088515,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.4875035,
+            "requested_tier": "frontier",
+            "tier": "frontier"
+          }
+        ],
+        "cancel": [],
+        "connect": [
+          [
+            "run_checker",
+            "final_answer"
+          ]
+        ],
+        "finish": false,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.024993,
+            "budget_remaining": 0.4875035,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.002691,
+            "decision": "proceed",
+            "input_tokens": 5716,
+            "latency_ms": 3692.0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_4",
+            "output_tokens": 292,
+            "projected_cost": 0.0099525,
+            "provider": "openrouter",
+            "reasoning": "off",
+            "requested_model": "google/gemini-3.7-flash",
+            "requested_tier": "frontier",
+            "role": "planner",
+            "sequence": 4,
+            "started_at": 1786870950.82989,
+            "tier": "frontier"
+          },
+          {
+            "budget_pressure": 0.0282915,
+            "budget_remaining": 0.48585425,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.0016492499999999999,
+            "decision": "proceed",
+            "input_tokens": 3458,
+            "latency_ms": 2964.0,
+            "model": "google/gemini-3.7-flash",
+            "node_id": "plan_5",
+            "output_tokens": 188,
+            "projected_cost": 0.0088515,
+            "provider": "openrouter",
+            "reasoning": "off",
+            "requested_model": "google/gemini-3.7-flash",
+            "requested_tier": "frontier",
+            "role": "planner",
+            "sequence": 5,
+            "started_at": 1786870954.531747,
+            "tier": "frontier"
+          }
+        ],
+        "reason": "sketch.js has been created and verified with node p5check.js sketch.js exiting with 0.",
+        "resume": [],
+        "trigger_event": 10,
+        "wait": []
+      },
+      "sequence": 11
+    },
+    {
+      "kind": "task_started",
+      "node_id": "final_answer",
+      "payload": {
+        "agent": "answer",
+        "skill": "answer_with_evidence"
+      },
+      "sequence": 12
+    },
+    {
+      "kind": "task_succeeded",
+      "node_id": "final_answer",
+      "payload": {
+        "answer": "The requested physics toy simulation, \"Rain that avoids my mouse,\" has been successfully implemented in `sketch.js` using global p5.js mode and verified via `node p5check.js sketch.js` (exiting with status 0).",
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.38585424999999995,
+            "ladder_steps": 0,
+            "model": "gemini-3.5-flash-lite",
+            "node_id": "final_answer",
+            "pressure": 0.0282915,
+            "projected_cost": 0.0015785999999999999,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.48585425,
+            "requested_tier": "standard",
+            "tier": "standard"
+          }
+        ],
+        "evidence_count": 3,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.0291403,
+            "budget_remaining": 0.48542985,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.0004244,
+            "decision": "proceed",
+            "input_tokens": 1810,
+            "latency_ms": 1162.0,
+            "model": "gemini-3.5-flash-lite",
+            "node_id": "final_answer",
+            "output_tokens": 52,
+            "projected_cost": 0.0015785999999999999,
+            "provider": "gemini_1",
+            "reasoning": "off",
+            "requested_model": "gemini-3.5-flash-lite",
+            "requested_tier": "standard",
+            "role": "answer",
+            "sequence": 6,
+            "started_at": 1786870957.52226,
+            "tier": "standard"
+          }
+        ],
+        "model": "gemini-3.5-flash-lite",
+        "provider": "gemini_1"
+      },
+      "sequence": 13
+    },
+    {
+      "kind": "graph_patched",
+      "node_id": null,
+      "payload": {
+        "add": [],
+        "cancel": [],
+        "connect": [],
+        "finish": true,
+        "reason": "terminal text capability final_answer succeeded",
+        "resume": [],
+        "trigger_event": 13,
+        "wait": []
+      },
+      "sequence": 14
+    }
+  ],
+  "finished": true,
+  "nodes": {
+    "create_sketch": {
+      "id": "create_sketch",
+      "input": {
+        "content": "let drops = [];\nlet splashes = [];\nconst NUM_DROPS = 350;\nconst AVOID_RADIUS = 90;\n\nfunction setup() {\n  createCanvas(640, 400);\n  for (let i = 0; i < NUM_DROPS; i++) {\n    drops.push(createDrop(true));\n  }\n}\n\nfunction createDrop(initial = false) {\n  return {\n    x: random(-50, width + 50),\n    y: initial ? random(0, height) : random(-60, -10),\n    vx: 0,\n    vy: random(5, 10),\n    baseSpeed: random(5, 10),\n    len: random(10, 22),\n    thickness: random(1, 2.5),\n    opacity: random(140, 240)\n  };\n}\n\nfunction addSplash(x, y) {\n  if (splashes.length < 50) {\n    splashes.push({\n      x: x,\n      y: y,\n      r: 2,\n      maxR: random(10, 25),\n      opacity: 200\n    });\n  }\n}\n\nfunction draw() {\n  background(12, 18, 30);\n\n  // Subtle umbrella / repeller field glow around mouse\n  noFill();\n  stroke(100, 180, 255, 30);\n  strokeWeight(12);\n  circle(mouseX, mouseY, AVOID_RADIUS * 2);\n  stroke(140, 210, 255, 90);\n  strokeWeight(2);\n  circle(mouseX, mouseY, AVOID_RADIUS * 2);\n\n  // Center indicator for mouse\n  fill(180, 225, 255, 200);\n  noStroke();\n  circle(mouseX, mouseY, 8);\n\n  // Update and draw splashes\n  for (let i = splashes.length - 1; i >= 0; i--) {\n    let s = splashes[i];\n    noFill();\n    stroke(160, 210, 255, s.opacity);\n    strokeWeight(1.2);\n    ellipse(s.x, s.y, s.r * 2, s.r * 0.8);\n    s.r += 1.2;\n    s.opacity -= 8;\n    if (s.opacity <= 0 || s.r >= s.maxR) {\n      splashes.splice(i, 1);\n    }\n  }\n\n  // Update and draw rain drops\n  for (let i = 0; i < drops.length; i++) {\n    let d = drops[i];\n\n    // Repulsion from mouse\n    let dx = d.x - mouseX;\n    let dy = d.y - mouseY;\n    let distSq = dx * dx + dy * dy;\n    let rSq = AVOID_RADIUS * AVOID_RADIUS;\n\n    if (distSq < rSq && distSq > 0.01) {\n      let distance = sqrt(distSq);\n      let nx = dx / distance;\n      let ny = dy / distance;\n      let force = (AVOID_RADIUS - distance) / AVOID_RADIUS;\n\n      // Push outward rapidly, biasing horizontal evasion\n      d.vx += nx * force * 3.5;\n      d.vy += ny * force * 1.5;\n\n      // Tangential velocity around the boundary\n      let side = nx >= 0 ? 1 : -1;\n      d.vx += side * 1.2;\n\n      if (random(1) < 0.1) {\n        addSplash(d.x, d.y);\n      }\n    }\n\n    // Natural downward motion and drag\n    d.vy = lerp(d.vy, d.baseSpeed, 0.08);\n    d.vx = lerp(d.vx, 0, 0.05);\n\n    d.x += d.vx;\n    d.y += d.vy;\n\n    // Draw rain drop\n    stroke(170, 215, 255, d.opacity);\n    strokeWeight(d.thickness);\n    let tailX = d.x - d.vx * 1.2;\n    let tailY = d.y - d.len - d.vy * 0.5;\n    line(d.x, d.y, tailX, tailY);\n\n    // Reset when exiting screen\n    if (d.y > height + 10 || d.x < -80 || d.x > width + 80) {\n      if (d.y > height && random(1) < 0.3) {\n        addSplash(d.x, height - 2);\n      }\n      drops[i] = createDrop(false);\n    }\n  }\n}",
+        "overwrite": true,
+        "path": "sketch.js"
+      },
+      "metadata": {
+        "agent": "create_file",
+        "planned_by": "general_agent",
+        "side_effect": true,
+        "tier": "standard"
+      },
+      "result": {
+        "budget_decisions": [],
+        "bytes": 2773,
+        "created": true,
+        "metered_calls": [],
+        "path": "sketch.js"
+      },
+      "skill": "create_file",
+      "state": "succeeded"
+    },
+    "final_answer": {
+      "id": "final_answer",
+      "input": {
+        "query": "The browser simulation for Physics Toy Factory requested ('Rain that avoids my mouse') has been implemented in sketch.js using p5.js global mode. It simulates falling rain with dynamic repulsion around the mouse cursor and splash effects. The code complies strictly with P5_API.md and verified with 'node p5check.js sketch.js' passing cleanly (exit code 0)."
+      },
+      "metadata": {
+        "agent": "answer",
+        "planned_by": "general_agent",
+        "side_effect": false,
+        "tier": "standard"
+      },
+      "result": {
+        "answer": "The requested physics toy simulation, \"Rain that avoids my mouse,\" has been successfully implemented in `sketch.js` using global p5.js mode and verified via `node p5check.js sketch.js` (exiting with status 0).",
+        "budget_decisions": [
+          {
+            "action": "proceed",
+            "allowance": 0.38585424999999995,
+            "ladder_steps": 0,
+            "model": "gemini-3.5-flash-lite",
+            "node_id": "final_answer",
+            "pressure": 0.0282915,
+            "projected_cost": 0.0015785999999999999,
+            "reason": "requested tier fits the node allowance",
+            "remaining": 0.48585425,
+            "requested_tier": "standard",
+            "tier": "standard"
+          }
+        ],
+        "evidence_count": 3,
+        "metered_calls": [
+          {
+            "budget_pressure": 0.0291403,
+            "budget_remaining": 0.48542985,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.0004244,
+            "decision": "proceed",
+            "input_tokens": 1810,
+            "latency_ms": 1162.0,
+            "model": "gemini-3.5-flash-lite",
+            "node_id": "final_answer",
+            "output_tokens": 52,
+            "projected_cost": 0.0015785999999999999,
+            "provider": "gemini_1",
+            "reasoning": "off",
+            "requested_model": "gemini-3.5-flash-lite",
+            "requested_tier": "standard",
+            "role": "answer",
+            "sequence": 6,
+            "started_at": 1786870957.52226,
+            "tier": "standard"
+          }
+        ],
+        "model": "gemini-3.5-flash-lite",
+        "provider": "gemini_1"
+      },
+      "skill": "answer_with_evidence",
+      "state": "succeeded"
+    },
+    "read_api_doc": {
+      "id": "read_api_doc",
+      "input": {
+        "limit": 200,
+        "offset": 1,
+        "path": "P5_API.md"
+      },
+      "metadata": {
+        "agent": "read_code",
+        "planned_by": "general_agent",
+        "side_effect": false,
+        "tier": "standard"
+      },
+      "result": {
+        "budget_decisions": [],
+        "end_line": 85,
+        "metered_calls": [],
+        "path": "P5_API.md",
+        "start_line": 1,
+        "text": "     1  # Physics Toy Factory p5 API\n     2  \n     3  This is the complete p5.js surface accepted by `p5check.js`. Generated `sketch.js` files must use\n     4  global mode, define `setup()` and `draw()`, call `createCanvas()`, and perform at least one visible draw\n     5  call. APIs not listed here are unsupported. Asset loading, networking, storage, DOM access, audio,\n     6  video, WebGL, shaders, offscreen graphics, and dynamic code generation are forbidden.\n     7  \n     8  The checker is a bounded smoke judge, not a visual or semantic grader. It runs `setup()` once,\n     9  `draw()` for five deterministic frames, and each defined input callback once.\n    10  \n    11  ## Lifecycle callbacks\n    12  \n    13  `setup`, `draw`, `windowResized`, `mousePressed`, `mouseReleased`, `mouseMoved`, `mouseDragged`,\n    14  `keyPressed`, `keyReleased`\n    15  \n    16  ## Canvas and environment\n    17  \n    18  Functions: `createCanvas`, `resizeCanvas`, `frameRate`, `millis`\n    19  \n    20  Values: `width`, `height`, `windowWidth`, `windowHeight`, `frameCount`, `deltaTime`\n    21  \n    22  ## Input\n    23  \n    24  `mouseX`, `mouseY`, `pmouseX`, `pmouseY`, `mouseIsPressed`, `key`, `keyCode`, `keyIsPressed`\n    25  \n    26  ## 2D drawing\n    27  \n    28  `background`, `clear`, `point`, `line`, `triangle`, `quad`, `rect`, `square`, `ellipse`, `circle`,\n    29  `arc`, `bezier`, `curve`\n    30  \n    31  ## Shapes\n    32  \n    33  `beginShape`, `vertex`, `curveVertex`, `bezierVertex`, `endShape`\n    34  \n    35  ## Style\n    36  \n    37  `fill`, `noFill`, `stroke`, `noStroke`, `strokeWeight`, `strokeCap`, `strokeJoin`, `colorMode`,\n    38  `rectMode`, `ellipseMode`, `blendMode`\n    39  \n    40  ## Text\n    41  \n    42  `text`, `textSize`, `textAlign`\n    43  \n    44  ## Transform\n    45  \n    46  `push`, `pop`, `translate`, `rotate`, `scale`, `angleMode`\n    47  \n    48  ## Color\n    49  \n    50  `color`, `red`, `green`, `blue`, `alpha`, `lerpColor`\n    51  \n    52  ## Random and noise\n    53  \n    54  `random`, `randomSeed`, `noise`, `noiseDetail`, `noiseSeed`\n    55  \n    56  Randomness and input values are deterministic inside the checker. The browser uses p5.js normally.\n    57  \n    58  ## Math\n    59  \n    60  `abs`, `ceil`, `constrain`, `dist`, `exp`, `floor`, `lerp`, `log`, `mag`, `map`, `max`, `min`,\n    61  `norm`, `pow`, `round`, `sq`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`,\n    62  `degrees`, `radians`\n    63  \n    64  ## Constants\n    65  \n    66  `PI`, `TWO_PI`, `HALF_PI`, `QUARTER_PI`, `TAU`, `CENTER`, `CORNER`, `CORNERS`, `RADIUS`, `CLOSE`,\n    67  `OPEN`, `CHORD`, `PIE`, `RGB`, `HSB`, `HSL`, `DEGREES`, `RADIANS`, `ADD`, `BLEND`, `ROUND`,\n    68  `SQUARE`, `PROJECT`, `MITER`, `BEVEL`\n    69  \n    70  ## Vectors\n    71  \n    72  Create a vector with `createVector` as `createVector(x, y)`. Instance methods are `set`, `copy`, `add`, `sub`, `mult`,\n    73  `div`, `mag`, `magSq`, `normalize`, `setMag`, `limit`, `heading`, `rotate`, `dot`, `dist`, and `lerp`.\n    74  \n    75  Static methods are `p5.Vector.add`, `p5.Vector.sub`, `p5.Vector.mult`, `p5.Vector.div`,\n    76  `p5.Vector.dist`, `p5.Vector.lerp`, `p5.Vector.fromAngle`, and `p5.Vector.random2D`.\n    77  \n    78  ## Explicitly unsupported examples\n    79  \n    80  The checker reports `Unsupported p5 API: <name>` for recognized APIs outside this product contract,\n    81  including `loadImage`, `loadJSON`, `loadSound`, `createVideo`, `createElement`, `createGraphics`,\n    82  `WEBGL`, `WEBGPU`, `shader`, `loadShader`, `createCapture`, and `createAudio`.\n    83  \n    84  Misspellings and all other unknown identifiers remain undefined and fail normally. The checker never\n    85  turns unknown calls into no-ops.",
+        "total_lines": 85,
+        "truncated": false
+      },
+      "skill": "read_code",
+      "state": "succeeded"
+    },
+    "run_checker": {
+      "id": "run_checker",
+      "input": {
+        "command": "node p5check.js sketch.js",
+        "timeout": 120
+      },
+      "metadata": {
+        "agent": "run_command",
+        "planned_by": "general_agent",
+        "side_effect": true,
+        "tier": "standard"
+      },
+      "result": {
+        "budget_decisions": [],
+        "command": "docker run --rm --network=none --memory=1g --cpus=1 --pids-limit=256 -v <PTF_WORKSPACE>:/workspace -w /workspace physics-toy-factory-node:22.20.0-phase6 node p5check.js sketch.js",
+        "duration_seconds": 0.334,
+        "exit_code": 0,
+        "metered_calls": [],
+        "ok": true,
+        "stderr": "",
+        "stdout": "P5CHECK PASS frames=5 draw_calls=1845\n",
+        "timed_out": false
+      },
+      "skill": "run_command",
+      "state": "succeeded"
+    }
+  },
+  "run_id": "run-13fd7410c11d"
+}

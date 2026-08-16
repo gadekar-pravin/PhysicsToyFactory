@@ -1,7 +1,8 @@
 # Phase 6 qualification evidence
 
-Recorded on 2026-08-15 UTC. Live qualification is a release/demo gate, separate from deterministic
-CI. This record distinguishes green implementation checks from the unresolved live outcome.
+Recorded on 2026-08-15 and 2026-08-16 UTC. Live qualification is a release/demo gate, separate from
+deterministic CI. This record preserves the original failed qualification, the remediation canary,
+and the later successful full requalification as distinct evidence sets.
 
 ## Source and runtime profile
 
@@ -86,11 +87,12 @@ collector used a relative SSE URL. It also revealed generic S17 sandbox/skill ro
 environment. The runbook now explicitly clears those roots before applying the narrow product
 profile.
 
-## Release decision and unresolved limitations
+## Historical release decision and unresolved limitations
 
-The Phase 6 implementation and deterministic gates pass. The live Phase 6 release gate does not.
-There is no verified linked preview, so browser/manual screenshot capture was correctly not run and
-the specified MVP must not yet be described as live-qualified.
+At the time of the 2026-08-15 evidence set, the Phase 6 implementation and deterministic gates
+passed, but the live Phase 6 release gate did not. There was no verified linked preview, so
+browser/manual screenshot capture was correctly not run and the specified MVP was not yet
+live-qualified.
 
 At the time of this failed evidence set, the required next step was to diagnose why the live S17
 graphs repeatedly finished without `answer_with_evidence`. The separately approved post-remediation
@@ -121,3 +123,47 @@ and correcting the dotenv-resistant S17 capability profile. No retry was used.
 The selected graph, event tape, summary, and screenshot are in `canary-2026-08-16/`. This proves the
 minimal remediation on the demo-critical creation path. It does not complete the full Phase 6 gate:
 the four suggested prompts and linked glowing-trails follow-up have not been rerun.
+
+## Full post-remediation requalification: passed
+
+The explicitly authorized full suite ran once on 2026-08-16 with no retries. It used a fresh S17
+data directory, fresh gateway ledger, and fresh product workspace. Every run had a `$0.50` ceiling,
+reached a verified `ready` outcome, executed a passing network-disabled container checker, and
+finished through a succeeded `answer_with_evidence` node.
+
+- PhysicsToyFactory runtime revision: `2b8a834aeb75446e73d0404df8520fd4ff042b0d`
+- S17Code revision: `4e085cb2e869694f036df2a6171530e147077e85`
+- glc_v5 revision: `66ed155addd78fe8f59673ddca59e0277a7d39e8`
+- Judge image ID: `sha256:1592c97f88b3d45ad796dd292877010dc5bbf2d6b90a7742f4507ed3ae6d4524`
+- Retry count: zero
+
+| Scenario | Run ID | Latest checker | S17 controller spend |
+| --- | --- | --- | ---: |
+| Rain that avoids my mouse | `run-13fd7410c11d` | exit 0, 1,845 draw calls | `$0.01457015` |
+| Bouncy magnets | `run-f0bf3f8a7f50` | exit 0, 130 draw calls | `$0.06352438` |
+| Angry solar system | `run-221f5bd6bfaf` | exit 0, 835 draw calls | `$0.03196028` |
+| Fish that follow my cursor | `run-132fb4549496` | exit 0, 515 draw calls | `$0.04699585` |
+| Create a tiny solar system. | `run-5578e66df13b` | exit 0, 960 draw calls | `$0.02824415` |
+| Make the planets leave glowing trails. | `run-ddb203fdabda` | exit 0, 1,120 draw calls | `$0.07379521` |
+
+The follow-up is product-linked to `run-5578e66df13b` and replaced its verified sketch revision with
+SHA-256 `63af056215249c0aa0d32068c0be5227371e8d8e42c5be1e672c16e48bcc9c0f`.
+All 59 model calls reported concrete routes: 53 planner calls used
+`openrouter/google/gemini-3.7-flash`, three answer calls used
+`gemini_1/gemini-3.5-flash-lite`, and three used `gemini_2/gemini-3.5-flash-lite`.
+
+S17 controller metering totaled `$0.25909001`; the fresh gateway list-price ledger totaled
+`$0.37562363` for the same 59 calls. These are reported separately because they are different
+accounting views. The final browser observation passed with a visible, pointer-responsive canvas in
+the sandboxed verified iframe and no system-error banner.
+
+The selected six graphs, six event tapes, summary, and screenshot are in
+`full-requalification-2026-08-16/`. Their recorded hashes were rechecked after browser capture, and
+the selected evidence contains no authorization material or machine-local paths.
+
+## Final release decision
+
+The full Phase 6 live gate now passes. Together with the green deterministic gates, this completes
+the specified MVP qualification. Browser-only automatic repair, Surprise Me, skill A/B,
+planted-refusal demonstrations, persistent multi-user sessions, and additional follow-ups remain
+outside the MVP boundary.
