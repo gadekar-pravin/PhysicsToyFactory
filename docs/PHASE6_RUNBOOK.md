@@ -132,15 +132,20 @@ export GLC_GATEWAY_DB=<runtime-dir>/gateway.sqlite
 uv sync
 uv run glc serve
 curl -sS http://127.0.0.1:8111/healthz
-curl -sS http://127.0.0.1:8111/readyz
+curl -sS http://127.0.0.1:8111/v1/providers
 ```
+
+The gateway serves no `/readyz`; that route belongs to S17, which probes the gateway through it in
+§5. `/healthz` reports only that the process is listening, so confirm provider configuration with
+`/v1/providers` and check `/v1/status` if a route later misbehaves. A qualification whose evidence
+must record real routes needs the expected provider names present here before any run starts.
 
 `GLC_GATEWAY_DB` is not optional. Every GLC generation on a machine otherwise shares
 `~/.glc/gateway.sqlite`, whose `calls` table was created by an older generation as an append-only
 ledger with a `CHECK(schema_version = 2)` column that glc_v5 never writes. glc_v5 creates that table
 with `CREATE TABLE IF NOT EXISTS`, so the create silently no-ops and every `POST /v1/chat` dies at
 insert time — surfacing as a gateway 500 and a `failed` S17 run with zero nodes, long after
-`/healthz` and `/readyz` have both passed. A qualification-private path also keeps the list-price
+`/healthz` and S17's `/readyz` have both passed. A qualification-private path also keeps the list-price
 ledger scoped to this qualification's calls, which is what makes the published gateway total
 comparable to the S17 controller total. Never migrate or drop `~/.glc/gateway.sqlite`; it is an audit
 ledger.
