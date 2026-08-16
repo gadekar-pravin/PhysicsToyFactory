@@ -14,6 +14,7 @@ from typing import Any
 
 from physics_toy_factory.config import Settings
 from physics_toy_factory.errors import ProductError, conflict
+from physics_toy_factory.history import ArchivedSketch, HistoryPage, HistoryStore
 from physics_toy_factory.models import (
     BrowserErrorBody,
     CodeResponse,
@@ -124,11 +125,15 @@ class Orchestrator:
         workspace: WorkspaceManager,
         session: SessionService,
         s17: S17Client,
+        history: HistoryStore,
     ) -> None:
         self._settings = settings
         self._workspace = workspace
         self._session = session
         self._s17 = s17
+        self._history = history
+        self._history_preview_lock = asyncio.Lock()
+        self._history_preview: _HistoryPreviewBinding | None = None
 
     async def create(self, prompt: str) -> StartEnvelope:
         """Start one least-privilege creation after all local preconditions pass."""
@@ -179,6 +184,109 @@ class Orchestrator:
         graph = await self._s17.get_run(run_id)
         await self._observe(run_id, graph)
         return graph
+
+    async def history_page(
+        self, *, limit: int, cursor: str | None, query: str
+    ) -> HistoryPage:
+        """List only product-owned saved runs without consulting arbitrary upstream IDs."""
+
+        return self._history.list_runs(limit=limit, cursor=cursor, query=query.strip())
+
+    async def history_detail(self, history_id: str) -> dict[str, Any]:
+        """Return one saved graph, refreshing only a still-current owned run."""
+
+        detail = self._history.detail(history_id)
+        summary = detail["history"]
+        degraded: dict[str, object] | None = None
+        if summary.get("outcome") == "running" and await self._session.owns(summary["run_id"]):
+            try:
+                await self.get_run(summary["run_id"])
+                detail = self._history.detail(history_id)
+            except ProductError as exc:
+                degraded = {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "retryable": exc.retryable,
+                }
+        detail["degraded"] = degraded
+        return detail
+
+    async def history_code(self, history_id: str) -> CodeResponse:
+        """Return the exact hash-validated archived sketch for one saved run."""
+
+        sketch = self._history.archived_sketch(history_id)
+        detail = self._history.detail(history_id)["history"]
+        return CodeResponse(
+            content=sketch.content,
+            bytes=sketch.bytes,
+            sha256=sketch.sha256,
+            verified=True,
+            verified_run_id=detail["run_id"],
+        )
+
+    async def prepare_history_preview(self, history_id: str) -> dict[str, object]:
+        """Issue a server-owned preview identity for immutable archived bytes."""
+
+        self._validate_workspace()
+        sketch = self._history.archived_sketch(history_id)
+        preview_id = secrets.token_urlsafe(32)
+        async with self._history_preview_lock:
+            self._history_preview = _HistoryPreviewBinding(
+                history_id=history_id,
+                preview_id=preview_id,
+                revision=sketch.sha256,
+            )
+        return {
+            "preview_id": preview_id,
+            "history_id": history_id,
+            "revision": sketch.sha256,
+            "url": f"/history-preview/{history_id}?preview_id={preview_id}",
+            "ready_timeout_ms": round(self._settings.preview_ready_timeout_seconds * 1000),
+        }
+
+    async def history_preview_shell(
+        self, *, history_id: str, preview_id: str
+    ) -> tuple[str, str]:
+        """Consume one historical preview shell lease and bind its local asset URLs."""
+
+        binding = await self._consume_history_preview(history_id=history_id, preview_id=preview_id)
+        self._validate_workspace()
+        sketch = self._history.archived_sketch(history_id)
+        if sketch.sha256 != binding.revision:
+            raise conflict("preview_not_ready", "The saved preview failed integrity validation.")
+        query = f"preview_id={preview_id}"
+        return self._render_preview_shell(
+            preview_id=preview_id,
+            p5_url=f"/api/history/{history_id}/preview/p5.min.js?{query}",
+            sketch_url=f"/api/history/{history_id}/preview/sketch.js?{query}",
+        )
+
+    async def history_preview_javascript(
+        self, *, history_id: str, preview_id: str, asset: str
+    ) -> bytes:
+        """Serve only trusted p5.js or the exact archived sketch for a bound lease."""
+
+        binding = await self._require_history_preview(
+            history_id=history_id, preview_id=preview_id
+        )
+        self._validate_workspace()
+        sketch = self._history.archived_sketch(history_id)
+        if sketch.sha256 != binding.revision:
+            raise conflict("preview_not_ready", "The saved preview failed integrity validation.")
+        if asset == "sketch.js":
+            return sketch.content.encode("utf-8")
+        if asset == "p5.min.js":
+            return self._read_trusted_bytes("shell/p5.min.js")
+        raise ProductError(404, "preview_asset_not_found", "Preview asset does not exist.")
+
+    async def delete_history(self, history_id: str) -> None:
+        """Remove one non-current local archive without touching S17 journals."""
+
+        current = await self._session.snapshot()
+        self._history.delete(history_id, current)
+        async with self._history_preview_lock:
+            if self._history_preview and self._history_preview.history_id == history_id:
+                self._history_preview = None
 
     async def refresh_active(self) -> None:
         """Fold a terminal active graph when session state is requested."""
@@ -231,20 +339,12 @@ class Orchestrator:
 
         await self._session.consume_preview_shell(preview_id=preview_id, revision=revision)
         await self._require_verified_sketch(revision)
-        template = self._read_trusted_text("shell/index.html")
-        if any(template.count(placeholder) == 0 for placeholder in SHELL_PLACEHOLDERS):
-            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
-        nonce = secrets.token_urlsafe(32)
         query = f"revision={revision}&preview_id={preview_id}"
-        rendered = (
-            template.replace("__PTF_NONCE__", nonce)
-            .replace("__PTF_PREVIEW_ID_JSON__", _json_string(preview_id))
-            .replace("__PTF_P5_URL__", f"/api/preview/p5.min.js?{query}")
-            .replace("__PTF_SKETCH_URL__", f"/api/preview/sketch.js?{query}")
+        return self._render_preview_shell(
+            preview_id=preview_id,
+            p5_url=f"/api/preview/p5.min.js?{query}",
+            sketch_url=f"/api/preview/sketch.js?{query}",
         )
-        if any(placeholder in rendered for placeholder in SHELL_PLACEHOLDERS):
-            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
-        return rendered, nonce
 
     async def preview_javascript(
         self, *, revision: str, preview_id: str, asset: str
@@ -286,16 +386,75 @@ class Orchestrator:
 
     async def _observe(self, run_id: str, graph: dict[str, Any]) -> None:
         if graph.get("finished") is not True:
+            await self._session.observe_graph(run_id, graph)
             return
         readiness = classify_graph(graph)
-        sketch_sha256: str | None = None
+        archived: ArchivedSketch | None = None
         if readiness.ready:
             try:
                 self._validate_workspace()
-                sketch_sha256 = self._read_sketch().sha256
+                sketch = self._read_sketch()
+                archived = ArchivedSketch(sketch.content, sketch.bytes, sketch.sha256)
             except ProductError:
                 readiness = Readiness(False, "sketch_invalid")
-        await self._session.finish(run_id, ready=readiness.ready, sketch_sha256=sketch_sha256)
+        await self._session.finish(
+            run_id,
+            ready=readiness.ready,
+            graph=graph,
+            sketch=archived,
+        )
+
+    async def _consume_history_preview(
+        self, *, history_id: str, preview_id: str
+    ) -> _HistoryPreviewBinding:
+        async with self._history_preview_lock:
+            binding = self._history_preview
+            if (
+                binding is None
+                or binding.history_id != history_id
+                or binding.preview_id != preview_id
+                or binding.shell_served
+            ):
+                raise conflict("preview_not_ready", "Only the selected saved preview is available.")
+            opened = _HistoryPreviewBinding(
+                history_id=binding.history_id,
+                preview_id=binding.preview_id,
+                revision=binding.revision,
+                shell_served=True,
+            )
+            self._history_preview = opened
+            return opened
+
+    async def _require_history_preview(
+        self, *, history_id: str, preview_id: str
+    ) -> _HistoryPreviewBinding:
+        async with self._history_preview_lock:
+            binding = self._history_preview
+            if (
+                binding is None
+                or binding.history_id != history_id
+                or binding.preview_id != preview_id
+                or not binding.shell_served
+            ):
+                raise conflict("preview_not_ready", "Only the selected saved preview is available.")
+            return binding
+
+    def _render_preview_shell(
+        self, *, preview_id: str, p5_url: str, sketch_url: str
+    ) -> tuple[str, str]:
+        template = self._read_trusted_text("shell/index.html")
+        if any(template.count(placeholder) == 0 for placeholder in SHELL_PLACEHOLDERS):
+            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
+        nonce = secrets.token_urlsafe(32)
+        rendered = (
+            template.replace("__PTF_NONCE__", nonce)
+            .replace("__PTF_PREVIEW_ID_JSON__", _json_string(preview_id))
+            .replace("__PTF_P5_URL__", p5_url)
+            .replace("__PTF_SKETCH_URL__", sketch_url)
+        )
+        if any(placeholder in rendered for placeholder in SHELL_PLACEHOLDERS):
+            raise ProductError(409, "workspace_invalid", "Trusted preview shell is invalid.")
+        return rendered, nonce
 
     def _validate_prompt(self, prompt: str) -> str:
         normalized = prompt.strip()
@@ -366,6 +525,14 @@ class _Sketch:
     content: str
     bytes: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _HistoryPreviewBinding:
+    history_id: str
+    preview_id: str
+    revision: str
+    shell_served: bool = False
 
 
 def _json_string(value: str) -> str:

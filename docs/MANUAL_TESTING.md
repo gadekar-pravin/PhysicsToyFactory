@@ -258,7 +258,7 @@ The journal is backed by the real S17 event tape, so it shows failures as readil
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Session shows `reset_required` on load | A previous sketch is still in the workspace; a product restart deliberately forgets session links | Click reset and confirm. Expected after any restart. |
+| Session shows `reset_required` on load | The workspace is dirty without a matching saved current session, or a prior run start was ambiguous | Inspect the saved history and S17 state, then click reset only after operator review. |
 | Every check exits `125`, `Cannot connect to the Docker daemon` | `DOCKER_HOST` unset and the daemon is not on `/var/run/docker.sock` | Export it in the S17 terminal from `docker context inspect` |
 | Run fails at the very end, after the check passed | Ollama down or `nomic-embed-text` missing — the answer node writes memory through it | Start Ollama, pull the model, rerun |
 | Gateway healthy but every run fails with 0 nodes | Shared `~/.glc/gateway.sqlite` schema clash | Set `GLC_GATEWAY_DB` to a private path |
@@ -279,6 +279,7 @@ for p in 8220 8213 8211; do
 done
 ```
 
-State in `$RT` survives and is reused on the next start. To begin completely fresh, delete `$RT` and
-restart from §5 — the product will reseed the workspace. S17 journals are durable and reset never
-deletes them.
+State in `$RT` survives and is reused on the next start. The product history catalog is stored at
+`$RT/artifacts/history.sqlite3`; ordinary factory reset preserves it, while deleting a saved run
+removes only the product-owned archive and not S17's journal. To begin completely fresh, delete
+`$RT` and restart from §5 — the product will reseed the workspace.

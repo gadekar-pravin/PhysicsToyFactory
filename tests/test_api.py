@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import sqlite3
 
 import httpx
 import pytest
@@ -364,6 +365,10 @@ async def test_follow_up_is_linked_anchored_reverified_and_allowed_only_once(pro
     assert session["current_sketch_sha256"] is None
     assert session["runs"][-1]["parent_run_id"] == create_id
     assert session["runs"][-1]["kind"] == "follow_up"
+    saved_runs = (await product.client.get("/api/history")).json()["items"]
+    saved_follow_up = next(item for item in saved_runs if item["run_id"] == follow_id)
+    assert saved_follow_up["parent_run_id"] == create_id
+    assert saved_follow_up["kind"] == "follow_up"
     blocked_preview = await product.client.post(
         "/api/preview", json={"revision": old_revision}
     )
@@ -529,6 +534,239 @@ async def test_reset_restores_fixture_new_session_and_preserves_artifacts(produc
 
 
 @pytest.mark.asyncio
+async def test_new_runs_are_saved_immediately_and_terminal_evidence_is_archived(product) -> None:
+    run_id = await _create(product, "A durable orbit")
+    first = (await product.client.get("/api/history")).json()
+    assert first["next_cursor"] is None
+    assert len(first["items"]) == 1
+    saved = first["items"][0]
+    assert saved["run_id"] == run_id
+    assert saved["user_prompt"] == "A durable orbit"
+    assert saved["outcome"] == "running"
+    assert saved["preview_available"] is False
+    initial_detail = (await product.client.get(f"/api/history/{saved['history_id']}")).json()
+    assert initial_detail["graph"]["finished"] is False
+
+    product.settings.workspace.joinpath("sketch.js").write_text(SKETCH, encoding="utf-8")
+    graph = terminal_graph(run_id)
+    product.fake.complete(run_id, graph)
+    assert (await product.client.get(f"/api/runs/{run_id}")).status_code == 200
+
+    detail = (await product.client.get(f"/api/history/{saved['history_id']}")).json()
+    assert detail["history"]["outcome"] == "ready"
+    assert detail["history"]["preview_available"] is True
+    assert detail["graph"] == graph
+    code = (await product.client.get(f"/api/history/{saved['history_id']}/code")).json()
+    assert code["content"] == SKETCH
+    assert code["sha256"] == hashlib.sha256(SKETCH.encode()).hexdigest()
+    assert code["verified_run_id"] == run_id
+
+
+@pytest.mark.asyncio
+async def test_saved_running_detail_preserves_cached_graph_when_s17_is_unavailable(product) -> None:
+    run_id = await _create(product, "A long-running orbit")
+    saved = (await product.client.get("/api/history")).json()["items"][0]
+    first = (await product.client.get(f"/api/history/{saved['history_id']}")).json()
+    assert first["graph"]["run_id"] == run_id
+    assert first["degraded"] is None
+    product.fake.raw_status = 503
+    cached = (await product.client.get(f"/api/history/{saved['history_id']}")).json()
+    assert cached["graph"] == first["graph"]
+    assert cached["history"]["outcome"] == "running"
+    assert cached["degraded"]["code"] == "s17_read_failed"
+
+
+@pytest.mark.asyncio
+async def test_saved_preview_survives_workspace_reset_with_same_security_headers(product) -> None:
+    await _make_ready(product)
+    saved = (await product.client.get("/api/history")).json()["items"][0]
+    assert (await product.client.post("/api/session/reset")).status_code == 200
+    assert not product.settings.workspace.joinpath("sketch.js").exists()
+
+    lease_response = await product.client.post(f"/api/history/{saved['history_id']}/preview")
+    lease = lease_response.json()
+    assert lease_response.status_code == 200
+    assert lease["history_id"] == saved["history_id"]
+    assert lease["revision"] == hashlib.sha256(SKETCH.encode()).hexdigest()
+    shell = await product.client.get(lease["url"])
+    assert shell.status_code == 200
+    assert shell.headers["cache-control"] == "no-store"
+    assert "connect-src 'none'" in shell.headers["content-security-policy"]
+    params = {"preview_id": lease["preview_id"]}
+    p5 = await product.client.get(
+        f"/api/history/{saved['history_id']}/preview/p5.min.js", params=params
+    )
+    sketch = await product.client.get(
+        f"/api/history/{saved['history_id']}/preview/sketch.js", params=params
+    )
+    assert p5.status_code == sketch.status_code == 200
+    assert sketch.content == SKETCH.encode()
+    assert p5.headers["access-control-allow-origin"] == "*"
+
+
+@pytest.mark.asyncio
+async def test_history_rejects_unknown_ids_and_tampered_archived_bytes(product) -> None:
+    await _make_ready(product)
+    saved = (await product.client.get("/api/history")).json()["items"][0]
+    unknown = await product.client.get("/api/history/history-" + "0" * 32)
+    malformed = await product.client.get("/api/history/not-a-history-id")
+    assert unknown.status_code == malformed.status_code == 404
+
+    with sqlite3.connect(product.settings.artifact_dir / "history.sqlite3") as database:
+        database.execute(
+            "UPDATE run_history SET sketch_content = ? WHERE history_id = ?",
+            (b"hostile replacement", saved["history_id"]),
+        )
+    code = await product.client.get(f"/api/history/{saved['history_id']}/code")
+    preview = await product.client.post(f"/api/history/{saved['history_id']}/preview")
+    assert code.status_code == preview.status_code == 409
+    assert code.json()["error"]["code"] == "history_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_history_delete_requires_reset_and_never_deletes_upstream(product) -> None:
+    run_id = await _make_ready(product)
+    saved = (await product.client.get("/api/history")).json()["items"][0]
+    blocked = await product.client.delete(f"/api/history/{saved['history_id']}")
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "history_run_current"
+    assert (await product.client.post("/api/session/reset")).status_code == 200
+    deleted = await product.client.delete(f"/api/history/{saved['history_id']}")
+    assert deleted.status_code == 204
+    assert (await product.client.get("/api/history")).json()["items"] == []
+    assert run_id in product.fake.runs
+
+
+@pytest.mark.asyncio
+async def test_failed_saved_run_has_evidence_but_no_code_or_preview(product) -> None:
+    run_id = await _create(product)
+    graph = terminal_graph(
+        run_id, checker_results=(("node p5check.js sketch.js", 1, False),)
+    )
+    product.fake.complete(run_id, graph)
+    await product.client.get(f"/api/runs/{run_id}")
+    saved = (await product.client.get("/api/history")).json()["items"][0]
+    assert saved["outcome"] == "failed"
+    assert saved["preview_available"] is False
+    detail = (await product.client.get(f"/api/history/{saved['history_id']}")).json()
+    assert detail["graph"] == graph
+    code = await product.client.get(f"/api/history/{saved['history_id']}/code")
+    preview = await product.client.post(f"/api/history/{saved['history_id']}/preview")
+    assert code.status_code == preview.status_code == 404
+    assert code.json()["error"]["code"] == "history_preview_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_history_search_and_cursor_pagination_are_bounded(product) -> None:
+    prompts = ["Amber comet", "Blue magnets", "Copper rain"]
+    for prompt in prompts:
+        run_id = await _create(product, prompt)
+        product.fake.complete(
+            run_id,
+            terminal_graph(run_id, checker_results=(("node p5check.js sketch.js", 1, False),)),
+        )
+        await product.client.get(f"/api/runs/{run_id}")
+        await product.client.post("/api/session/reset")
+
+    first = (await product.client.get("/api/history", params={"limit": 2})).json()
+    assert len(first["items"]) == 2
+    assert first["next_cursor"]
+    second = (
+        await product.client.get(
+            "/api/history", params={"limit": 2, "cursor": first["next_cursor"]}
+        )
+    ).json()
+    assert len(second["items"]) == 1
+    assert {item["run_id"] for item in first["items"]}.isdisjoint(
+        {item["run_id"] for item in second["items"]}
+    )
+    match = (await product.client.get("/api/history", params={"q": "blue"})).json()
+    assert [item["user_prompt"] for item in match["items"]] == ["Blue magnets"]
+    invalid = await product.client.get("/api/history", params={"cursor": "not-a-cursor"})
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_history_cursor"
+
+
+@pytest.mark.asyncio
+async def test_current_session_and_owned_active_run_survive_product_restart(
+    settings, fake_s17: FakeS17
+) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_s17.app), base_url="http://s17.test"
+    ) as upstream_one:
+        app_one = create_app(settings, http_client=upstream_one)
+        async with app_one.router.lifespan_context(app_one):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_one), base_url="http://product.test"
+            ) as client_one:
+                run_id = (
+                    await client_one.post("/api/runs", json={"prompt": "Restart-safe orbit"})
+                ).json()["run_id"]
+                session_id = (await client_one.get("/api/session")).json()["session"][
+                    "session_id"
+                ]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_s17.app), base_url="http://s17.test"
+    ) as upstream_two:
+        app_two = create_app(settings, http_client=upstream_two)
+        async with app_two.router.lifespan_context(app_two):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_two), base_url="http://product.test"
+            ) as client_two:
+                restored = (await client_two.get("/api/session")).json()["session"]
+                assert restored["session_id"] == session_id
+                assert restored["active_run_id"] == run_id
+                assert restored["state"] == "running"
+                raw = await client_two.get(f"/api/runs/{run_id}")
+                assert raw.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready", [True, False])
+async def test_terminal_ready_and_failed_sessions_survive_product_restart(
+    settings, fake_s17: FakeS17, ready: bool
+) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_s17.app), base_url="http://s17.test"
+    ) as upstream_one:
+        app_one = create_app(settings, http_client=upstream_one)
+        async with app_one.router.lifespan_context(app_one):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_one), base_url="http://product.test"
+            ) as client_one:
+                run_id = (await client_one.post("/api/runs", json={"prompt": "Persist me"})).json()[
+                    "run_id"
+                ]
+                if ready:
+                    settings.workspace.joinpath("sketch.js").write_text(SKETCH, encoding="utf-8")
+                checker = 0 if ready else 1
+                fake_s17.complete(
+                    run_id,
+                    terminal_graph(
+                        run_id,
+                        checker_results=(("node p5check.js sketch.js", checker, False),),
+                    ),
+                )
+                await client_one.get(f"/api/runs/{run_id}")
+                before = (await client_one.get("/api/session")).json()["session"]
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=fake_s17.app), base_url="http://s17.test"
+    ) as upstream_two:
+        app_two = create_app(settings, http_client=upstream_two)
+        async with app_two.router.lifespan_context(app_two):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app_two), base_url="http://product.test"
+            ) as client_two:
+                restored = (await client_two.get("/api/session")).json()["session"]
+                assert restored == before
+                saved = (await client_two.get("/api/history")).json()["items"][0]
+                assert saved["outcome"] == ("ready" if ready else "failed")
+                assert saved["preview_available"] is ready
+
+
+@pytest.mark.asyncio
 async def test_tampered_trusted_asset_blocks_start(product) -> None:
     product.settings.workspace.joinpath("p5check.js").write_text("tampered", encoding="utf-8")
     response = await product.client.post("/api/runs", json={"prompt": "build"})
@@ -573,7 +811,15 @@ async def test_ambiguous_start_timeout_sets_reset_required_without_inventing_run
             ) as client:
                 response = await client.post("/api/runs", json={"prompt": "ambiguous"})
                 session = (await client.get("/api/session")).json()["session"]
+        restarted_app = create_app(settings, http_client=upstream)
+        async with restarted_app.router.lifespan_context(restarted_app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=restarted_app),
+                base_url="http://product.test",
+            ) as restarted_client:
+                restarted = (await restarted_client.get("/api/session")).json()["session"]
     assert response.status_code == 504
     assert response.json()["error"]["code"] == "s17_start_ambiguous"
     assert session["state"] == "reset_required"
     assert session["runs"] == []
+    assert restarted == session

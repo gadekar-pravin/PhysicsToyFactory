@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from physics_toy_factory.history import ArchivedSketch, HistoryStore
 from physics_toy_factory.models import RunKind, RunOutcome, SessionState
 from physics_toy_factory.orchestrator import classify_graph, normalizes_to_checker
 from physics_toy_factory.prompts import creation_goal, follow_up_goal
@@ -112,15 +113,22 @@ def test_prompt_builders_keep_fixed_constraints_and_escape_closing_delimiter() -
 
 
 @pytest.mark.asyncio
-async def test_session_links_create_and_one_follow_up_atomically() -> None:
+async def test_session_links_create_and_one_follow_up_atomically(tmp_path: Path) -> None:
     from physics_toy_factory.session import SessionService
 
-    service = SessionService()
+    history = HistoryStore(tmp_path / "artifacts", max_sketch_bytes=100_000)
+    service = SessionService(history)
     create = await service.start(
         kind=RunKind.CREATE, prompt="one", starter=lambda: _return("run-create")
     )
     assert create.kind is RunKind.CREATE
-    await service.finish("run-create", ready=True, sketch_sha256="a" * 64)
+    graph = terminal_graph("run-create")
+    await service.finish(
+        "run-create",
+        ready=True,
+        graph=graph,
+        sketch=ArchivedSketch("x", 1, "a" * 64),
+    )
     follow = await service.start(
         kind=RunKind.FOLLOW_UP, prompt="two", starter=lambda: _return("run-follow")
     )

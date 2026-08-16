@@ -48,6 +48,11 @@ POST /api/runs
 POST /api/runs/follow-up
 GET  /api/runs/{session-owned-run-id}
 GET  /api/runs/{session-owned-run-id}/events
+GET  /api/history?limit={1..100}&cursor={opaque}&q={search}
+GET  /api/history/{product-history-id}
+GET  /api/history/{product-history-id}/code
+POST /api/history/{product-history-id}/preview
+DELETE /api/history/{product-history-id}
 GET  /api/code
 POST /api/preview
 GET  /preview/{verified-sha256}?preview_id={server-issued-id}
@@ -57,9 +62,11 @@ POST /api/runs/{session-owned-run-id}/browser-error
 ```
 
 The browser never supplies a workspace path or upstream URL, and it never receives the S17 control
-token. A process restart intentionally forgets product session links. If the workspace contains a
-prior sketch or other dirty content, the new session starts in `reset_required`; reset explicitly
-before creating another toy.
+token. Accepted run ownership, the current session, graph snapshots, and verified sketch bytes are
+saved in `PTF_ARTIFACT_DIR/history.sqlite3`. A process restart restores the current session and can
+reconnect only to its previously accepted S17 run. Reset creates a new active session without
+deleting saved runs; the **Saved runs** workspace reopens their evidence, code, and verified preview
+read-only. Runs created before the catalog exists are not imported.
 
 ## Phase 1 deterministic gate
 

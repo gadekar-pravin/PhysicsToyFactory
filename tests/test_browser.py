@@ -243,6 +243,81 @@ async def test_recorded_red_green_activity_and_safe_dialogs(
 
 
 @pytest.mark.browser
+@pytest.mark.preview
+@pytest.mark.asyncio
+async def test_saved_run_library_reopens_evidence_code_preview_and_deletes_safely(
+    browser_page: Page,
+    live_product: str,
+    fake_s17: FakeS17,
+    settings,
+    recorded_graph: dict,
+) -> None:
+    complete_recorded_run(fake_s17, settings, recorded_graph)
+    browser_page.on("dialog", lambda dialog: asyncio.create_task(dialog.accept()))
+    await browser_page.goto(live_product)
+    hostile_prompt = '<img id="history-prompt-attack" src=x onerror=alert(1)> orbit'
+    await browser_page.locator("#prompt").fill(hostile_prompt)
+    await browser_page.locator("#create-button").click()
+    await expect(browser_page.locator("#app")).to_have_attribute("data-state", "ready")
+    await expect(browser_page.locator("#saved-count")).to_have_text("1")
+
+    await browser_page.locator("#saved-runs").click()
+    history = browser_page.locator("#history-dialog")
+    await expect(history).to_be_visible()
+    await expect(browser_page.locator(".history-item")).to_have_count(1)
+    await expect(browser_page.locator(".history-item")).to_contain_text("Verified")
+    await expect(browser_page.locator(".history-item")).to_contain_text("history-prompt-attack")
+    assert await history.locator("img").count() == 0
+    await expect(browser_page.locator("#history-detail")).to_contain_text(hostile_prompt)
+    await expect(browser_page.get_by_role("button", name="Delete")).to_be_disabled()
+
+    await browser_page.get_by_role("button", name="Preview").click()
+    saved_iframe = browser_page.locator(".history-preview iframe")
+    await expect(saved_iframe).to_have_attribute("sandbox", "allow-scripts")
+    await expect(saved_iframe).to_have_attribute("referrerpolicy", "no-referrer")
+    await expect(browser_page.locator(".history-preview-message")).to_be_hidden()
+    saved_frame = browser_page.frame(url=re.compile(r"/history-preview/history-[0-9a-f]{32}"))
+    assert saved_frame is not None
+    assert await saved_frame.evaluate("typeof draw === 'function'") is True
+    session_before = await browser_page.evaluate(
+        "fetch('/api/session').then(response => response.json())"
+    )
+    assert session_before["session"]["state"] == "ready"
+    assert session_before["session"]["follow_up_used"] is False
+
+    await browser_page.get_by_role("button", name="View evidence").click()
+    await expect(history).to_be_hidden()
+    await expect(browser_page.locator("#run-dialog")).to_be_visible()
+    await expect(browser_page.locator("#run-content")).to_contain_text("run-attack")
+    assert await browser_page.locator("#run-dialog img").count() == 0
+    await browser_page.get_by_role("button", name="Close run dialog").click()
+
+    await browser_page.locator("#saved-runs").click()
+    await expect(history).to_be_visible()
+    await history.get_by_role("button", name="View code").click()
+    await expect(history).to_be_hidden()
+    await expect(browser_page.locator("#code-dialog")).to_be_visible()
+    await expect(browser_page.locator("#code-content")).to_contain_text("code-attack")
+    assert await browser_page.locator("#code-dialog img").count() == 0
+    await browser_page.get_by_role("button", name="Close code dialog").click()
+
+    await browser_page.locator("#reset-session").click()
+    await expect(browser_page.locator("#app")).to_have_attribute("data-state", "landing")
+    await browser_page.locator("#saved-runs").click()
+    await expect(browser_page.get_by_role("button", name="Delete")).to_be_enabled()
+    await browser_page.set_viewport_size({"width": 390, "height": 844})
+    bounds = await history.bounding_box()
+    assert bounds is not None
+    assert bounds["x"] >= 0 and bounds["y"] >= 0
+    assert bounds["x"] + bounds["width"] <= 391
+    assert bounds["y"] + bounds["height"] <= 845
+    await browser_page.get_by_role("button", name="Delete").click()
+    await expect(browser_page.locator(".history-item")).to_have_count(0)
+    await expect(browser_page.locator("#saved-count")).to_have_text("0")
+    assert "run-fake-1" in fake_s17.runs
+
+
+@pytest.mark.browser
 @pytest.mark.activity
 @pytest.mark.asyncio
 async def test_run_evidence_overview_graph_raw_and_degraded_shapes(
